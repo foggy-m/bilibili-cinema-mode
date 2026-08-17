@@ -1,0 +1,31 @@
+# Logs & Runtime
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node dependencies
+node_modules/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temporary and agent directories
+.agents/
+.codegraph/
+.codex/
+.opencode/
+.opensquilla/
+.opensquilla-cache/
+.slim/
+tmp/
+scratch/
+*.bat

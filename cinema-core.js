@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS = {
   p2pBlock: false,           // 屏蔽 B站 P2P 混流：删 SDK 全局 + 定期重删 __DASH_P2P_TYPE__ 强制走纯 CDN（切下一P后生效，刷新更彻底；激进项，默认关）
   p2pTempMs: 4000,           // 切P关键窗口临时屏蔽 P2P 的时长（毫秒），钳制 1000–10000；窗口期保证预取字节命中 byteStore
   autoCloseTab: false,  // 播放完毕自动关闭标签页
-  progressStyle: 'classic', // 统一进度条样式：classic | flow | minimal | neon | film
+  progressStyle: 'classic', // 统一进度条样式：classic | flow | minimal | neon | film | chapter | aurora | sunset | cyberpunk | sakura
   lightsOut: false,         // 关灯模式（压暗播放器外区域，默认关）
   lightsOutOpacity: 0.85,   // 关灯压暗程度（0.5 - 0.95）
   theme: 'auto',            // 影院模式 UI 主题：auto | dark | light（auto 跟随系统深色模式）

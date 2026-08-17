@@ -513,6 +513,106 @@ body.cinema-bottom-progress .squirtle-progress-tooltip {
   height: 9px;
 }
 
+/* --- 极光 (Aurora) --- */
+#cinema-progress-bar.progress-style-aurora {
+  height: 5px;
+}
+#cinema-progress-bar.progress-style-aurora:hover {
+  height: 8px;
+}
+#cinema-progress-bar.progress-style-aurora #cinema-progress-fill {
+  background: linear-gradient(90deg, #00f5d4 0%, #00bbf9 45%, #9b5de5 80%, #f72585 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 0 10px rgba(0, 245, 212, 0.6), 0 0 18px rgba(155, 93, 229, 0.4);
+  animation: cinema-aurora-flow 3.5s ease infinite alternate;
+}
+#cinema-progress-bar.progress-style-aurora #cinema-progress-fill::after {
+  background: #ffffff;
+  border-radius: 3px;
+  transform: translateY(-50%) rotate(45deg);
+  box-shadow: 0 0 8px #00f5d4, 0 0 14px rgba(155, 93, 229, 0.8);
+}
+@keyframes cinema-aurora-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
+}
+
+/* --- 暮色 (Sunset Glow) --- */
+#cinema-progress-bar.progress-style-sunset {
+  height: 5px;
+}
+#cinema-progress-bar.progress-style-sunset:hover {
+  height: 8px;
+}
+#cinema-progress-bar.progress-style-sunset #cinema-progress-fill {
+  background: linear-gradient(90deg, #7209b7 0%, #f72585 30%, #ff5400 70%, #ffb703 100%);
+  box-shadow: 0 0 10px rgba(255, 84, 0, 0.6), 0 0 18px rgba(247, 37, 133, 0.35);
+}
+#cinema-progress-bar.progress-style-sunset #cinema-progress-fill::after {
+  background: #fff3bf;
+  box-shadow: 0 0 8px #ffb703, 0 0 15px rgba(255, 84, 0, 0.9);
+}
+
+/* --- 赛博 (Cyberpunk Matrix) --- */
+#cinema-progress-bar.progress-style-cyberpunk {
+  height: 5px;
+  background: rgba(10, 15, 26, 0.85);
+  border-top: 1px solid rgba(0, 242, 254, 0.25);
+  border-bottom: 1px solid rgba(255, 0, 127, 0.25);
+}
+#cinema-progress-bar.progress-style-cyberpunk:hover {
+  height: 9px;
+}
+#cinema-progress-bar.progress-style-cyberpunk #cinema-progress-fill {
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(0, 0, 0, 0.4) 0 3px,
+      transparent 3px 6px),
+    linear-gradient(90deg, #00f2fe 0%, #4facfe 50%, #f093fb 85%, #f5576c 100%);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.8), 0 0 20px rgba(245, 87, 108, 0.5);
+  animation: cinema-cyber-pulse 2s ease-in-out infinite;
+}
+#cinema-progress-bar.progress-style-cyberpunk #cinema-progress-fill::after {
+  width: 6px;
+  height: 14px;
+  border-radius: 1px;
+  background: #00f2fe;
+  box-shadow: 0 0 8px #00f2fe, 0 0 14px #f5576c;
+}
+@keyframes cinema-cyber-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.82; }
+}
+
+/* --- 樱粉 (Sakura Pink) --- */
+#cinema-progress-bar.progress-style-sakura {
+  height: 5px;
+}
+#cinema-progress-bar.progress-style-sakura:hover {
+  height: 8px;
+}
+#cinema-progress-bar.progress-style-sakura #cinema-progress-fill {
+  background: linear-gradient(90deg, #ff758c 0%, #ff7eb3 50%, #ffa8a8 100%);
+  box-shadow: 0 0 10px rgba(255, 117, 140, 0.6), 0 0 18px rgba(255, 126, 179, 0.4);
+}
+#cinema-progress-bar.progress-style-sakura #cinema-progress-fill::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: cinema-sakura-shimmer 2.2s ease-in-out infinite;
+}
+#cinema-progress-bar.progress-style-sakura #cinema-progress-fill::after {
+  background: #ffffff;
+  box-shadow: 0 0 8px #ff758c, 0 0 12px rgba(255, 126, 179, 0.8);
+}
+@keyframes cinema-sakura-shimmer {
+  from { left: -35%; }
+  to { left: 100%; }
+}
+
 /* ------------------------------------------------------------
    暂停时停住流光/霓虹动画
    （cinema-player.js 在 play/pause 事件切换 cinema-paused class）

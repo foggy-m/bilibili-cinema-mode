@@ -1680,6 +1680,10 @@ function createSettingsPanel(wrap) {
               <option value="neon" ${settings.progressStyle === 'neon' ? 'selected' : ''}>霓虹</option>
               <option value="film" ${settings.progressStyle === 'film' ? 'selected' : ''}>胶片</option>
               <option value="chapter" ${settings.progressStyle === 'chapter' ? 'selected' : ''}>章节</option>
+              <option value="aurora" ${settings.progressStyle === 'aurora' ? 'selected' : ''}>极光</option>
+              <option value="sunset" ${settings.progressStyle === 'sunset' ? 'selected' : ''}>暮色</option>
+              <option value="cyberpunk" ${settings.progressStyle === 'cyberpunk' ? 'selected' : ''}>赛博</option>
+              <option value="sakura" ${settings.progressStyle === 'sakura' ? 'selected' : ''}>樱粉</option>
             </select>
           </div>
           <label class="cinema-sp-toggle" title="关灯模式：大屏下自动激活荧幕氛围光（Ambilight）、电影胶片暗角与纯净暗场水印淡化">
@@ -2223,7 +2227,8 @@ function applySettings() {
     ui.bar.classList.remove(
       'progress-style-classic', 'progress-style-flow',
       'progress-style-minimal', 'progress-style-neon', 'progress-style-film',
-      'progress-style-chapter'
+      'progress-style-chapter', 'progress-style-aurora', 'progress-style-sunset',
+      'progress-style-cyberpunk', 'progress-style-sakura'
     );
     ui.bar.classList.add('progress-style-' + style);
     // 章节样式：fill 渐变由内联设置（面板切换样式时在此应用/取消）

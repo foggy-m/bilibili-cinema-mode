@@ -1,0 +1,2451 @@
+/* ============================================================
+   B站影院模式 - 样式
+   ============================================================ */
+
+/* --- 设计令牌 --- */
+:root {
+  --c-radius-sm: 5px;
+  --c-radius-md: 9px;
+  --c-radius-lg: 14px;
+  --c-radius-pill: 999px;
+  --c-shadow-pop: 0 12px 40px rgba(0, 0, 0, .65), 0 2px 10px rgba(0, 0, 0, .4);
+  --c-shadow-glow: 0 0 24px rgba(0, 161, 214, 0.45);
+  --c-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --c-font-display: 'Cinzel', 'STSong', 'Songti SC', 'Source Han Serif SC', 'SimSun', serif;
+  --c-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  --c-blue: #00a1d6;
+}
+
+/* --- 主题令牌（影院模式自有面板/徽章/过渡等 UI；不动 B站页面） ---
+   light = 现有半透明深色玻璃面板（保持老用户观感不变）
+   dark  = 更深的近黑面板 + B站蓝强调 + 高对比文字 */
+:root,
+[data-cinema-theme="light"] {
+  --c-panel-bg: rgba(20, 20, 20, 0.95);
+  --c-panel-bg-solid: rgba(20, 20, 20, 0.98);
+  --c-panel-border: rgba(255, 255, 255, 0.1);
+  --c-text: #fff;
+  --c-text-dim: rgba(255, 255, 255, 0.85);
+  --c-text-faint: rgba(255, 255, 255, 0.55);
+  --c-text-mute: rgba(255, 255, 255, 0.4);
+  --c-accent: #00a1d6;
+  --c-accent-hover: #00b5e5;
+  --c-accent-soft: rgba(0, 161, 214, 0.2);
+  --c-accent-soft-hover: rgba(0, 161, 214, 0.45);
+  --c-accent-border: rgba(0, 165, 214, 0.5);
+  --c-input-bg: rgba(255, 255, 255, 0.1);
+  --c-input-border: rgba(255, 255, 255, 0.2);
+  --c-hover-bg: rgba(255, 255, 255, 0.06);
+  --c-row-hover: rgba(255, 255, 255, 0.16);
+  --c-divider: rgba(255, 255, 255, 0.08);
+  --c-chip-bg: rgba(0, 0, 0, 0.55);
+  --c-caret: rgba(255, 255, 255, 0.6);
+  --c-option-bg: #1c1c1c;
+  --c-overlay-bg: rgba(0, 0, 0, 0.62);
+  --c-transition-bg: radial-gradient(120% 90% at 50% 45%, rgba(10, 10, 14, 0.88), rgba(0, 0, 0, 0.96) 70%);
+  --c-badge-info: rgba(0, 161, 214, 0.9);
+  --c-badge-success: rgba(0, 180, 90, 0.9);
+  --c-badge-error: rgba(220, 50, 50, 0.9);
+}
+
+[data-cinema-theme="dark"] {
+  --c-panel-bg: rgba(7, 9, 13, 0.97);
+  --c-panel-bg-solid: rgba(9, 11, 16, 0.99);
+  --c-panel-border: rgba(0, 161, 214, 0.3);
+  --c-text: #f4f6f8;
+  --c-text-dim: rgba(244, 246, 248, 0.88);
+  --c-text-faint: rgba(244, 246, 248, 0.6);
+  --c-text-mute: rgba(244, 246, 248, 0.42);
+  --c-accent: #00a1d6;
+  --c-accent-hover: #00b5e5;
+  --c-accent-soft: rgba(0, 161, 214, 0.28);
+  --c-accent-soft-hover: rgba(0, 161, 214, 0.5);
+  --c-accent-border: rgba(0, 181, 229, 0.6);
+  --c-input-bg: rgba(255, 255, 255, 0.08);
+  --c-input-border: rgba(0, 161, 214, 0.4);
+  --c-hover-bg: rgba(0, 161, 214, 0.14);
+  --c-row-hover: rgba(0, 161, 214, 0.24);
+  --c-divider: rgba(0, 161, 214, 0.2);
+  --c-chip-bg: rgba(0, 0, 0, 0.78);
+  --c-caret: rgba(0, 181, 229, 0.9);
+  --c-option-bg: #0d1117;
+  --c-overlay-bg: rgba(0, 0, 0, 0.7);
+  --c-transition-bg: radial-gradient(120% 90% at 50% 45%, rgba(5, 7, 11, 0.94), rgba(0, 0, 0, 0.99) 70%);
+  --c-badge-info: rgba(0, 161, 214, 0.95);
+  --c-badge-success: rgba(0, 190, 95, 0.95);
+  --c-badge-error: rgba(230, 55, 55, 0.95);
+}
+
+/* --- 隐藏分P相关界面（通用：播放器内分P控件 + 分P列表，保留子合集标题） --- */
+body.cinema-hide-parts .multi-page,
+body.cinema-hide-parts .bpx-player-ep,
+body.cinema-hide-parts .list-box,
+body.cinema-hide-parts .cur-page,
+body.cinema-hide-parts .video-page-card,
+body.cinema-hide-parts .page-list,
+body.cinema-hide-parts .page-item,
+body.cinema-hide-parts .video-info-detail .video-title .video-title-href,
+body.cinema-hide-parts .bpx-player-ctrl-ep,
+body.cinema-hide-parts [class*="multi-page"],
+body.cinema-hide-parts [class*="part-list"],
+body.cinema-hide-parts [class*="pagelist"],
+body.cinema-hide-parts [class*="page-list"],
+body.cinema-hide-parts [class*="page-item"] {
+  display: none !important;
+}
+
+/* --- 合集模式下额外隐藏右侧合集面板 --- */
+body.cinema-hide-parts.cinema-season-mode .video-sections,
+body.cinema-hide-parts.cinema-season-mode .video-section-block,
+body.cinema-hide-parts.cinema-season-mode .video-pod,
+body.cinema-hide-parts.cinema-season-mode .episode-list-panel,
+body.cinema-hide-parts.cinema-season-mode .video-sections-list,
+body.cinema-hide-parts.cinema-season-mode .video-episode-card,
+body.cinema-hide-parts.cinema-season-mode .season-list,
+body.cinema-hide-parts.cinema-season-mode .ugc-season,
+body.cinema-hide-parts.cinema-season-mode [class*="video-section"],
+body.cinema-hide-parts.cinema-season-mode [class*="episode-panel"],
+body.cinema-hide-parts.cinema-season-mode [class*="episode-list"],
+body.cinema-hide-parts.cinema-season-mode [class*="season-list"],
+body.cinema-hide-parts.cinema-season-mode [class*="ugc-season"] {
+  display: none !important;
+}
+
+/* 隐藏分P相关的标题后缀（如 "P1/10"） */
+body.cinema-hide-parts .video-title .video-title-href {
+  display: none !important;
+}
+
+/* 隐藏播放器内的选集按钮 */
+body.cinema-hide-parts .bpx-player-ctrl-btn[data-type="ep"],
+body.cinema-hide-parts .squirtle-ep,
+body.cinema-hide-parts [class*="ep-btn"] {
+  display: none !important;
+}
+
+/* ============================================================
+   统一进度条
+   ============================================================ */
+
+#cinema-progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  z-index: 20;
+  transition: background 0.15s ease;
+}
+
+/* 进度条挂在控制栏/外层容器时的兜底定位 */
+.bpx-player-control-wrap > #cinema-progress-bar,
+.squirtle-controller > #cinema-progress-bar,
+.bilibili-player-video-control-wrap > #cinema-progress-bar {
+  top: 0;
+  bottom: auto;
+  height: 4px;
+}
+.bpx-player-control-wrap:hover > #cinema-progress-bar,
+.squirtle-controller:hover > #cinema-progress-bar,
+.bilibili-player-video-control-wrap:hover > #cinema-progress-bar,
+.bpx-player-control-wrap > #cinema-progress-bar:hover,
+.squirtle-controller > #cinema-progress-bar:hover,
+.bilibili-player-video-control-wrap > #cinema-progress-bar:hover {
+  height: 8px;
+}
+
+.bpx-player-container > #cinema-progress-bar,
+#bilibili-player > #cinema-progress-bar,
+.bilibili-player > #cinema-progress-bar {
+  top: auto;
+  bottom: 0;
+  height: 4px;
+}
+.bpx-player-container > #cinema-progress-bar:hover,
+#bilibili-player > #cinema-progress-bar:hover,
+.bilibili-player > #cinema-progress-bar:hover {
+  height: 8px;
+}
+
+#cinema-progress-bar.dragging {
+  cursor: grabbing;
+}
+
+/* 键盘聚焦（slider 语义）：box-shadow 焦点环，不撑动布局 */
+#cinema-progress-bar:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.8);
+}
+
+/* 悬停幽灵预览：宽度表示悬停位置，被已播放 fill 盖住属预期 */
+#cinema-progress-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--hover-pct, 0%);
+  background: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 1;
+}
+
+#cinema-progress-bar:hover::before {
+  opacity: 1;
+}
+
+/* 缓冲进度（已缓冲区间，位于已播放进度下层） */
+#cinema-progress-buffered {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  background: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+  transition: width 0.3s linear;
+  z-index: 1;
+}
+
+#cinema-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00a1d6, #00b5e5);
+  border-radius: 0 2px 2px 0;
+  transition: width 0.3s linear;
+  position: relative;
+  z-index: 2;
+}
+
+#cinema-progress-fill::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+#cinema-progress-bar:hover #cinema-progress-fill::after,
+#cinema-progress-bar.dragging #cinema-progress-fill::after {
+  opacity: 1;
+}
+
+/* 分P分隔标记（精致暗色细分界线，避免密集成白色栅栏） */
+#cinema-progress-markers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.cinema-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(0, 0, 0, 0.35);
+  transform: translateX(-50%);
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.cinema-marker.cinema-marker-dense {
+  opacity: 0.45;
+}
+
+#cinema-progress-bar:hover .cinema-marker {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+#cinema-progress-bar:hover .cinema-marker.cinema-marker-dense {
+  opacity: 0.7;
+}
+
+/* 拖拽时 fill 即时跟随，不做过渡 */
+#cinema-progress-bar.dragging #cinema-progress-fill {
+  transition: none;
+}
+
+/* 悬停预览气泡（紧凑精致微型分镜：画面缩略图 + 时间码 + 紧凑分P标签，避免遮挡大面积画面） */
+#cinema-progress-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 200;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(15, 18, 24, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-family: var(--c-font-sans);
+  padding: 3px 4px 4px 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+}
+
+#cinema-progress-tooltip.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* 底部接管时确保容器不裁剪预览气泡 */
+body.cinema-bottom-progress .bpx-player-progress-wrap,
+body.cinema-bottom-progress .bpx-player-control-top,
+body.cinema-bottom-progress .squirtle-progress-wrap {
+  overflow: visible !important;
+}
+
+/* 底部接管时隐藏原生进度条层与原生悬浮提示，防止视觉重合冲突 */
+body.cinema-bottom-progress .bpx-player-progress-schedule,
+body.cinema-bottom-progress .bpx-player-progress-buffer,
+body.cinema-bottom-progress .bpx-player-progress-shadow,
+body.cinema-bottom-progress .bpx-player-progress-floating,
+body.cinema-bottom-progress .bpx-player-progress-popup,
+body.cinema-bottom-progress .squirtle-progress-schedule,
+body.cinema-bottom-progress .squirtle-progress-buffer,
+body.cinema-bottom-progress .squirtle-progress-tooltip {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.cinema-tooltip-viewfinder {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #000;
+}
+
+.cinema-tooltip-thumb {
+  display: none;
+  border-radius: 4px;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.7);
+}
+
+/* 监视器四角裁切微标 */
+.cinema-vf-corner {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-color: rgba(0, 161, 214, 0.7);
+  pointer-events: none;
+}
+.cinema-vf-corner.tl { top: 2px; left: 2px; border-top: 1px solid; border-left: 1px solid; }
+.cinema-vf-corner.tr { top: 2px; right: 2px; border-top: 1px solid; border-right: 1px solid; }
+.cinema-vf-corner.bl { bottom: 2px; left: 2px; border-bottom: 1px solid; border-left: 1px solid; }
+.cinema-vf-corner.br { bottom: 2px; right: 2px; border-bottom: 1px solid; border-right: 1px solid; }
+
+.cinema-tooltip-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 3px;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.cinema-tooltip-timecode {
+  font-family: var(--c-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: #fff;
+  line-height: 1;
+}
+
+.cinema-tooltip-part-pill {
+  display: inline-block;
+  padding: 0 4px;
+  height: 15px;
+  line-height: 14px;
+  font-size: 10px;
+  border-radius: 3px;
+  background: rgba(0, 161, 214, 0.18);
+  color: #00b5e5;
+  border: 0.5px solid rgba(0, 161, 214, 0.3);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------
+   进度条样式（可选择）
+   ------------------------------------------------------------
+   classic 经典 | flow 流光 | minimal 极简
+   neon 霓虹   | film 胶片
+   ------------------------------------------------------------ */
+
+/* --- 流光 --- */
+#cinema-progress-bar.progress-style-flow #cinema-progress-fill {
+  background: linear-gradient(90deg, #00a1d6, #00b5e5);
+  box-shadow: 0 0 10px rgba(0, 163, 214, 0.7);
+  overflow: hidden;
+}
+
+#cinema-progress-bar.progress-style-flow #cinema-progress-fill::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: cinema-flow 1.8s linear infinite;
+}
+
+#cinema-progress-bar.progress-style-flow #cinema-progress-fill::after {
+  background: #fff;
+  box-shadow: 0 0 6px rgba(0, 181, 229, 0.9);
+}
+
+@keyframes cinema-flow {
+  from { left: -40%; }
+  to { left: 100%; }
+}
+
+/* --- 极简 --- */
+#cinema-progress-bar.progress-style-minimal {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#cinema-progress-bar.progress-style-minimal:hover {
+  height: 3px;
+}
+
+#cinema-progress-bar.progress-style-minimal #cinema-progress-fill {
+  background: #00a1d6;
+  border-radius: 0;
+}
+
+#cinema-progress-bar.progress-style-minimal #cinema-progress-fill::after {
+  display: none;
+}
+
+#cinema-progress-bar.progress-style-minimal:hover #cinema-progress-fill::after {
+  display: none;
+}
+
+/* --- 霓虹 --- */
+#cinema-progress-bar.progress-style-neon #cinema-progress-fill {
+  background: linear-gradient(90deg, #ff2d95, #7b2dff, #00e5ff);
+  box-shadow: 0 0 8px rgba(123, 45, 255, 0.9), 0 0 16px rgba(0, 229, 255, 0.6);
+  animation: cinema-neon-pulse 2s ease-in-out infinite;
+}
+
+#cinema-progress-bar.progress-style-neon #cinema-progress-fill::after {
+  background: #fff;
+  box-shadow: 0 0 10px rgba(123, 45, 255, 1);
+}
+
+/* 霓虹脉冲：用 opacity 振幅（仅合成层开销）替代 filter:brightness()（每帧重绘） */
+@keyframes cinema-neon-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+/* --- 胶片 --- */
+#cinema-progress-bar.progress-style-film {
+  height: 6px;
+  background: rgba(20, 20, 20, 0.75);
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+#cinema-progress-bar.progress-style-film:hover {
+  height: 10px;
+}
+
+#cinema-progress-bar.progress-style-film #cinema-progress-fill {
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(0, 0, 0, 0.35) 0 2px,
+      transparent 2px 14px),
+    linear-gradient(90deg, #b8860b, #ffd700);
+  border-radius: 0;
+}
+
+#cinema-progress-bar.progress-style-film #cinema-progress-fill::after {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #ffd700;
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.8);
+}
+
+/* --- 章节（分P分段着色） ---
+   轨道与 classic 一致；fill 的渐变（按分P区间的 B站蓝邻近色 + 边界深色分隔）
+   由 JS 内联设置（inline style 优先级天然高于下方样式类规则），此处不写 fill 背景避免冲突 */
+#cinema-progress-bar.progress-style-chapter {
+  height: 5px;
+}
+
+#cinema-progress-bar.progress-style-chapter:hover {
+  height: 9px;
+}
+
+/* --- 极光 (Aurora) --- */
+#cinema-progress-bar.progress-style-aurora {
+  height: 5px;
+}
+#cinema-progress-bar.progress-style-aurora:hover {
+  height: 8px;
+}
+#cinema-progress-bar.progress-style-aurora #cinema-progress-fill {
+  background: linear-gradient(90deg, #00f5d4 0%, #00bbf9 45%, #9b5de5 80%, #f72585 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 0 10px rgba(0, 245, 212, 0.6), 0 0 18px rgba(155, 93, 229, 0.4);
+  animation: cinema-aurora-flow 3.5s ease infinite alternate;
+}
+#cinema-progress-bar.progress-style-aurora #cinema-progress-fill::after {
+  background: #ffffff;
+  border-radius: 3px;
+  transform: translateY(-50%) rotate(45deg);
+  box-shadow: 0 0 8px #00f5d4, 0 0 14px rgba(155, 93, 229, 0.8);
+}
+@keyframes cinema-aurora-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
+}
+
+/* --- 暮色 (Sunset Glow) --- */
+#cinema-progress-bar.progress-style-sunset {
+  height: 5px;
+}
+#cinema-progress-bar.progress-style-sunset:hover {
+  height: 8px;
+}
+#cinema-progress-bar.progress-style-sunset #cinema-progress-fill {
+  background: linear-gradient(90deg, #7209b7 0%, #f72585 30%, #ff5400 70%, #ffb703 100%);
+  box-shadow: 0 0 10px rgba(255, 84, 0, 0.6), 0 0 18px rgba(247, 37, 133, 0.35);
+}
+#cinema-progress-bar.progress-style-sunset #cinema-progress-fill::after {
+  background: #fff3bf;
+  box-shadow: 0 0 8px #ffb703, 0 0 15px rgba(255, 84, 0, 0.9);
+}
+
+/* --- 赛博 (Cyberpunk Matrix) --- */
+#cinema-progress-bar.progress-style-cyberpunk {
+  height: 5px;
+  background: rgba(10, 15, 26, 0.85);
+  border-top: 1px solid rgba(0, 242, 254, 0.25);
+  border-bottom: 1px solid rgba(255, 0, 127, 0.25);
+}
+#cinema-progress-bar.progress-style-cyberpunk:hover {
+  height: 9px;
+}
+#cinema-progress-bar.progress-style-cyberpunk #cinema-progress-fill {
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(0, 0, 0, 0.4) 0 3px,
+      transparent 3px 6px),
+    linear-gradient(90deg, #00f2fe 0%, #4facfe 50%, #f093fb 85%, #f5576c 100%);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.8), 0 0 20px rgba(245, 87, 108, 0.5);
+  animation: cinema-cyber-pulse 2s ease-in-out infinite;
+}
+#cinema-progress-bar.progress-style-cyberpunk #cinema-progress-fill::after {
+  width: 6px;
+  height: 14px;
+  border-radius: 1px;
+  background: #00f2fe;
+  box-shadow: 0 0 8px #00f2fe, 0 0 14px #f5576c;
+}
+@keyframes cinema-cyber-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.82; }
+}
+
+/* --- 樱粉 (Sakura Pink) --- */
+#cinema-progress-bar.progress-style-sakura {
+  height: 5px;
+}
+#cinema-progress-bar.progress-style-sakura:hover {
+  height: 8px;
+}
+#cinema-progress-bar.progress-style-sakura #cinema-progress-fill {
+  background: linear-gradient(90deg, #ff758c 0%, #ff7eb3 50%, #ffa8a8 100%);
+  box-shadow: 0 0 10px rgba(255, 117, 140, 0.6), 0 0 18px rgba(255, 126, 179, 0.4);
+}
+#cinema-progress-bar.progress-style-sakura #cinema-progress-fill::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: cinema-sakura-shimmer 2.2s ease-in-out infinite;
+}
+#cinema-progress-bar.progress-style-sakura #cinema-progress-fill::after {
+  background: #ffffff;
+  box-shadow: 0 0 8px #ff758c, 0 0 12px rgba(255, 126, 179, 0.8);
+}
+@keyframes cinema-sakura-shimmer {
+  from { left: -35%; }
+  to { left: 100%; }
+}
+
+/* ------------------------------------------------------------
+   暂停时停住流光/霓虹动画
+   （cinema-player.js 在 play/pause 事件切换 cinema-paused class）
+   ------------------------------------------------------------ */
+#cinema-progress-bar.cinema-paused #cinema-progress-fill::before,
+#cinema-progress-bar.cinema-paused #cinema-progress-fill {
+  animation-play-state: paused;
+}
+
+/* ============================================================
+   预取就绪指示器（播放器右上角胶囊："下一集已预取"）
+   ============================================================ */
+
+#cinema-prefetch-status {
+  position: absolute;
+  top: 12px;               /* 位于播放器右上角 */
+  right: 12px;
+  z-index: 110;            /* 高于控件与预览气泡 */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--c-chip-bg);
+  color: var(--c-text);
+  font-size: 12px;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  padding: 3px 10px;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+#cinema-prefetch-status.visible {
+  opacity: 0.85;
+  transform: translateY(0);
+}
+
+.cinema-prefetch-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4caf50;
+  animation: cinema-prefetch-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cinema-prefetch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ============================================================
+   过渡动画
+   ============================================================ */
+
+/* 冻结帧遮罩：出现必须瞬时（0.3s fade-in 会先露黑屏），只在撤下时淡出 */
+.cinema-freeze-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 150;            /* 低于过渡层(200)高于进度条(100)，盖住视频但让幕间标题卡浮在上面 */
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+  object-fit: contain;     /* canvas 内容等比缩放 */
+  background: #000;
+}
+.cinema-freeze-frame.visible {
+  opacity: 1;
+}
+.cinema-freeze-frame.visible.cinema-freeze-out {
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+#cinema-transition {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 200;
+  background: var(--c-transition-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#cinema-transition.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cinema-transition-text {
+  color: #fff;
+  font-size: 18px;
+  font-family: var(--c-font-sans);
+  letter-spacing: 1px;
+  animation: cinema-pulse 1.5s ease-in-out infinite;
+}
+
+/* 幕间英文 ACT 标号：小巧冷峻、大字间距 */
+.cinema-transition-act {
+  color: var(--c-accent-hover);
+  font-family: var(--c-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
+}
+
+#cinema-transition.active .cinema-transition-act {
+  transform: translateY(0);
+  opacity: 0.9;
+}
+
+/* 幕间主标题（第N幕）：古典衬线 + 电影镜头慢推进景深动效 */
+.cinema-transition-title {
+  color: #fff;
+  font-family: var(--c-font-display);
+  font-size: 42px;
+  font-weight: 600;
+  letter-spacing: 0.25em;
+  text-indent: 0.25em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8), 0 0 32px rgba(0, 161, 214, 0.25);
+  transform: scale(0.95);
+  opacity: 0;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease;
+}
+
+#cinema-transition.active .cinema-transition-title {
+  transform: scale(1);
+  opacity: 1;
+}
+
+/* 幕间分P标题 */
+.cinema-transition-sub {
+  margin-top: 14px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--c-font-sans);
+  letter-spacing: 1.5px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s, opacity 0.4s ease 0.1s;
+}
+
+#cinema-transition.active .cinema-transition-sub {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* 幕间扫光加载条 */
+.cinema-transition-loader {
+  margin-top: 24px;
+  width: 140px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--c-radius-pill);
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 0 8px rgba(0, 161, 214, 0.3);
+}
+
+.cinema-transition-loader::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), var(--c-accent-hover), transparent);
+  animation: cinema-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes cinema-sweep {
+  from { left: -50%; }
+  to { left: 100%; }
+}
+
+/* 播放完毕片尾卡（谢幕演职员风格） */
+.cinema-finished-actions {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 20px;
+  animation: cinema-finished-fade 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cinema-finished-fade {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.cinema-finished-badge {
+  font-family: var(--c-font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  color: var(--c-accent-hover);
+  margin-bottom: 8px;
+  opacity: 0.85;
+}
+
+.cinema-finished-title {
+  color: #fff;
+  font-family: var(--c-font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  max-width: 75vw;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
+.cinema-finished-sub {
+  margin-top: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--c-font-sans);
+  letter-spacing: 0.8px;
+}
+
+.cinema-finished-divider {
+  width: 180px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  margin: 18px auto;
+}
+
+.cinema-finished-btns {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.cinema-finished-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 161, 214, 0.25);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 24px;
+  border-radius: var(--c-radius-pill);
+  cursor: pointer;
+  font-family: var(--c-font-sans);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: background 0.18s ease, transform 0.15s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.cinema-finished-btn:hover {
+  background: rgba(0, 181, 229, 0.55);
+  border-color: rgba(0, 181, 229, 0.8);
+  box-shadow: 0 6px 20px rgba(0, 161, 214, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+}
+
+.cinema-finished-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.cinema-finished-next {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 75vw;
+  border: 1px solid rgba(0, 181, 229, 0.4);
+  background: rgba(0, 161, 214, 0.16);
+  color: var(--c-text);
+  font-size: 13px;
+  font-family: var(--c-font-sans);
+  padding: 9px 22px;
+  border-radius: var(--c-radius-pill);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: all 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cinema-finished-next:hover {
+  background: rgba(0, 161, 214, 0.35);
+  border-color: rgba(0, 181, 229, 0.85);
+  box-shadow: 0 6px 24px rgba(0, 161, 214, 0.35);
+  transform: translateY(-2px);
+}
+
+.cinema-finished-next-label {
+  color: var(--c-accent-hover);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.cinema-finished-next-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes cinema-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* ============================================================
+   设置按钮
+   ============================================================ */
+
+#cinema-settings-btn {
+  position: fixed;
+  z-index: 100000;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--c-chip-bg);
+  color: var(--c-text);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  opacity: 0.85;
+  transition: transform 0.3s ease, opacity 0.2s ease, background 0.2s ease;
+  backdrop-filter: blur(4px);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+#cinema-settings-btn.cinema-dragging {
+  cursor: grabbing;
+  opacity: 1;
+  background: var(--c-accent);
+  transition: none;
+  transform: none; /* 拖拽中不旋转，避免视觉位移干扰 left/top 定位手感 */
+}
+
+/* 设置按钮为 fixed 定位挂在 body 上，始终可见（悬停加深），无需依赖播放器 hover */
+
+#cinema-settings-btn:hover {
+  background: var(--c-accent);
+  transform: rotate(90deg) scale(1.06);
+}
+
+/* 键盘可访问性：设置按钮 / 面板关闭 / 历史操作 / 恢复卡按钮 / 引导按钮 / 快捷键键帽 / 备份按钮 / 排除chip / 收藏 / 片尾卡下一作 的可见焦点环（B站蓝） */
+#cinema-settings-btn:focus-visible,
+.cinema-sp-close:focus-visible,
+.cinema-history-close:focus-visible,
+.cinema-history-action:focus-visible,
+.cinema-switch-recovery-btn:focus-visible,
+.cinema-close-tip-btn:focus-visible,
+.cinema-onboarding-btn:focus-visible,
+.cinema-shortcut-key:focus-visible,
+.cinema-data-btn:focus-visible,
+#cinema-excluded-stub:focus-visible,
+.cinema-bookmark-btn:focus-visible,
+.cinema-history-star:focus-visible,
+.cinema-finished-next:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   设置面板
+   ============================================================ */
+
+#cinema-settings-panel {
+  position: fixed;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  height: auto;
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(0, 161, 214, 0.07), transparent 55%),
+    var(--c-panel-bg);
+  border: 1px solid var(--c-panel-border);
+  border-radius: 10px;
+  box-shadow: var(--c-shadow-pop), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* 常驻布局：弹出带弹性回弹，收起轻微压扁淡出 */
+  transform-origin: top right;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px) scale(0.92);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.3s cubic-bezier(0.22, 1.2, 0.36, 1),
+    visibility 0s linear 0.3s;
+}
+
+#cinema-settings-panel.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  transition:
+    opacity 0.16s ease,
+    transform 0.34s cubic-bezier(0.22, 1.2, 0.36, 1),
+    visibility 0s;
+}
+
+/* 拉伸结束回弹：圆角弹回 + 果冻晃动 */
+#cinema-settings-panel.settling {
+  transition:
+    border-radius 0.5s cubic-bezier(0.22, 1.2, 0.36, 1),
+    opacity 0.16s ease,
+    visibility 0s linear 0.5s;
+  animation: cinema-sp-boing 0.5s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+#cinema-settings-panel.resizing {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes cinema-sp-boing {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.02); }
+  65% { transform: scale(0.992); }
+  100% { transform: scale(1); }
+}
+
+.cinema-sp-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 12px 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+  color: var(--c-text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--c-divider);
+  cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.cinema-sp-title-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cinema-sp-title-text::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  box-shadow: 0 0 8px var(--c-accent);
+}
+
+.cinema-sp-title.cinema-sp-dragging {
+  cursor: grabbing;
+}
+
+.cinema-sp-close {
+  color: var(--c-text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease, transform 0.2s ease;
+}
+
+.cinema-sp-close:hover {
+  color: var(--c-text);
+  background: var(--c-hover-bg);
+  transform: rotate(90deg);
+}
+
+.cinema-sp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 子行（数值 / 滑杆 / 说明） */
+.cinema-sp-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  color: var(--c-text-faint);
+  font-size: 11px;
+}
+
+.cinema-sp-sub input[type="number"],
+.cinema-sp-ms input[type="number"] {
+  width: 48px;
+  padding: 2px 4px;
+  border: 1px solid var(--c-input-border);
+  border-radius: 6px;
+  background: var(--c-input-bg);
+  color: var(--c-text);
+  font-size: 11px;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cinema-sp-sub input[type="number"]:focus,
+.cinema-sp-ms input[type="number"]:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.18);
+}
+
+.cinema-sp-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 9px -4px 0;
+  padding: 7px 6px 5px;
+  border-top: 1px solid var(--c-divider);
+  color: var(--c-text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.cinema-sp-section:hover {
+  color: var(--c-text);
+  background: var(--c-hover-bg);
+}
+
+.cinema-sp-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cinema-sp-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-accent-hover);
+  opacity: 0.85;
+}
+
+.cinema-sp-caret {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--c-caret);
+  border-bottom: 1.5px solid var(--c-caret);
+  transform: rotate(45deg);
+  margin-top: -4px;
+  transition: transform 0.32s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+.cinema-sp-section.collapsed .cinema-sp-caret {
+  transform: rotate(-45deg);
+  margin-top: 0;
+}
+
+/* 分组体：grid 0fr/1fr 高度动画，展开带软弹 */
+.cinema-sp-group {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.32s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+.cinema-sp-group.collapsed {
+  grid-template-rows: 0fr;
+}
+
+.cinema-sp-group-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cinema-sp-group.collapsed .cinema-sp-group-inner {
+  visibility: hidden;
+}
+
+.cinema-sp-select-row {
+  justify-content: space-between;
+  padding: 4px 0;
+  color: var(--c-text-dim);
+  font-size: 12px;
+}
+
+.cinema-sp-select-row select {
+  max-width: 118px;
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-input-border);
+  border-radius: 6px;
+  color: var(--c-text);
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.cinema-sp-select-row select:focus {
+  border-color: var(--c-accent);
+}
+
+.cinema-sp-select-row select option {
+  background: var(--c-option-bg);
+  color: var(--c-text);
+}
+
+.cinema-sp-sub input[type="range"] {
+  flex: 1;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+
+/* 快捷键编辑器（设置面板内）：动作行 + 按键按钮 + 恢复默认链接 */
+.cinema-sp-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 4px;
+}
+
+.cinema-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.cinema-shortcut-label {
+  color: var(--c-text-dim);
+}
+
+/* 调音台 / 机械键帽（Studio Keycaps） */
+.cinema-shortcut-key {
+  min-width: 44px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 2px solid rgba(0, 0, 0, 0.6);
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  color: var(--c-text);
+  font-size: 11px;
+  font-family: var(--c-font-mono);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.1s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.12s ease;
+}
+
+.cinema-shortcut-key:hover {
+  border-color: var(--c-accent);
+  background: linear-gradient(180deg, rgba(0, 161, 214, 0.2), rgba(0, 161, 214, 0.08));
+  box-shadow: 0 2px 8px rgba(0, 161, 214, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.cinema-shortcut-key:active {
+  transform: translateY(1px);
+  border-bottom-width: 1px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* 录制中：雷达脉冲扫描波纹 */
+.cinema-shortcut-key.capturing {
+  border-color: var(--c-accent-hover);
+  background: var(--c-accent);
+  color: #fff;
+  cursor: wait;
+  box-shadow: 0 0 14px var(--c-accent);
+  animation: cinema-keycap-radar 1.2s infinite ease-in-out;
+}
+
+@keyframes cinema-keycap-radar {
+  0%, 100% { box-shadow: 0 0 4px var(--c-accent), 0 0 12px var(--c-accent); }
+  50% { box-shadow: 0 0 12px var(--c-accent-hover), 0 0 24px var(--c-accent-hover); }
+}
+
+.cinema-shortcut-key.conflict {
+  border-color: #ff5c5c;
+  color: #ff5c5c;
+  background: rgba(255, 92, 92, 0.16);
+  box-shadow: 0 0 8px rgba(255, 92, 92, 0.4);
+}
+
+.cinema-shortcut-reset-row {
+  margin-top: 4px;
+  text-align: right;
+}
+
+/* 数据区：备份导出 / 导入 */
+.cinema-data-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.cinema-data-btn {
+  flex: 1;
+  text-align: center;
+  padding: 5px 0;
+  font-size: 11px;
+  border: none;
+  border-radius: 8px;
+  background: var(--c-accent-soft);
+  color: var(--c-text-dim);
+  cursor: pointer;
+  font-family: var(--c-font-sans);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.cinema-data-btn:hover {
+  background: var(--c-accent-soft-hover);
+  color: var(--c-text);
+}
+
+.cinema-data-btn:active {
+  transform: scale(0.96);
+}
+
+/* 收藏当前视频按钮（设置面板常用组内，整行通栏） */
+.cinema-bookmark-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 5px 0;
+  margin-top: 6px;
+  font-size: 11px;
+  border: 1px solid var(--c-input-border);
+  border-radius: 8px;
+  background: var(--c-accent-soft);
+  color: var(--c-text-dim);
+  cursor: pointer;
+  font-family: var(--c-font-sans);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.cinema-bookmark-btn:hover {
+  background: var(--c-accent-soft-hover);
+  color: var(--c-text);
+}
+
+.cinema-bookmark-btn:active {
+  transform: scale(0.97);
+}
+
+.cinema-bookmark-btn.active {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+  color: var(--c-accent-hover);
+}
+
+.cinema-range-val {
+  min-width: 34px;
+  text-align: right;
+}
+
+.cinema-io-reset {
+  color: var(--c-text-faint);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.cinema-io-reset:hover {
+  color: var(--c-accent-hover);
+}
+
+/* --- 果冻玻璃：滚动体（标题栏不随内容滚动） --- */
+.cinema-sp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 12px 14px;
+  overscroll-behavior: contain;
+}
+
+.cinema-sp-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cinema-sp-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cinema-sp-body::-webkit-scrollbar-thumb {
+  background: var(--c-input-border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.cinema-sp-body::-webkit-scrollbar-thumb:hover {
+  background: var(--c-accent);
+  background-clip: padding-box;
+}
+
+/* --- 果冻开关（原生 checkbox 隐藏，data-key change 事件不受影响） --- */
+.cinema-sp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--c-text-dim);
+  transition: color 0.15s ease;
+}
+
+.cinema-sp-toggle:hover {
+  color: var(--c-text);
+}
+
+.cinema-sp-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.cinema-sp-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-input-border);
+  transition: background 0.22s ease, border-color 0.22s ease;
+}
+
+.cinema-sp-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-text-faint);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+}
+
+.cinema-sp-toggle input:checked + .cinema-sp-toggle-track {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
+.cinema-sp-toggle input:checked + .cinema-sp-toggle-track::after {
+  transform: translateX(14px);
+  background: #fff;
+}
+
+.cinema-sp-toggle input:active + .cinema-sp-toggle-track::after {
+  transform: scale(0.78);
+}
+
+.cinema-sp-toggle input:checked:active + .cinema-sp-toggle-track::after {
+  transform: translateX(14px) scale(0.78);
+}
+
+.cinema-sp-toggle input:focus-visible + .cinema-sp-toggle-track {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+/* 切换瞬间的按压回弹（JS 在 change 时加 .squish） */
+.cinema-sp-toggle-track.squish {
+  animation: cinema-sp-squish 0.3s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+@keyframes cinema-sp-squish {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+.cinema-sp-toggle-sm {
+  font-size: 11px;
+}
+
+/* 两个紧凑开关并排（跨标签 / 跨设备同步） */
+.cinema-sp-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+  flex-wrap: wrap;
+}
+
+.cinema-sp-pair .cinema-sp-toggle {
+  flex: 1;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+/* P2P 常驻屏蔽 + 切P临时 ms 同行 */
+.cinema-sp-row-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cinema-sp-ms {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-text-faint);
+  font-size: 11px;
+}
+
+.cinema-sp-ms input[type="number"] {
+  width: 46px;
+}
+
+/* --- 果冻拉伸手柄（右下主 / 左下辅） --- */
+.cinema-sp-resize {
+  position: absolute;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
+  touch-action: none;
+}
+
+.cinema-sp-resize[data-dir="se"] {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.cinema-sp-resize[data-dir="sw"] {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+
+.cinema-sp-resize::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--c-text-faint);
+  border-bottom: 1.5px solid var(--c-text-faint);
+  border-radius: 0 0 3px 0;
+  opacity: 0.45;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.cinema-sp-resize[data-dir="sw"]::after {
+  left: 4px;
+  right: auto;
+  border-left: 1.5px solid var(--c-text-faint);
+  border-bottom: 1.5px solid var(--c-text-faint);
+  border-right: none;
+  border-radius: 0 0 0 3px;
+}
+
+.cinema-sp-resize:hover::after {
+  opacity: 1;
+  border-color: var(--c-accent);
+}
+
+/* ============================================================
+   播放器容器需要 relative 定位（确保绝对定位子元素正确）
+   注意：不能用 !important！否则会覆盖 B站网页全屏的
+   #bilibili-player.mode-webscreen { position: fixed } 规则，
+   导致网页全屏无法铺满屏幕（右边空一块、画面错乱）
+   ============================================================ */
+
+.bpx-player-container,
+.bilibili-player,
+#bilibili-player,
+.player-wrap {
+  position: relative;
+}
+
+/* ============================================================
+   状态徽章（固定右下角，提示插件是否生效）
+   ============================================================ */
+
+#cinema-status-badge {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 99999;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: #fff;
+  pointer-events: auto;
+  opacity: 0.92;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.3s ease, box-shadow 0.2s ease;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#cinema-status-badge.cinema-badge-dragging {
+  cursor: grabbing;
+  opacity: 1;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  transition: none;
+}
+
+#cinema-status-badge.cinema-badge-info {
+  background: var(--c-badge-info);
+}
+
+#cinema-status-badge.cinema-badge-success {
+  background: var(--c-badge-success);
+}
+
+#cinema-status-badge.cinema-badge-error {
+  background: var(--c-badge-error);
+}
+
+/* ============================================================
+   跳过指定片段（进度条上的跳过区间标记）
+   ============================================================ */
+
+.cinema-skip-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 80, 80, 0.7),
+    rgba(255, 80, 80, 0.7) 4px,
+    rgba(180, 30, 30, 0.7) 4px,
+    rgba(180, 30, 30, 0.7) 8px
+  );
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  z-index: 2;
+  cursor: pointer;
+}
+
+.cinema-skip-seg:hover {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 120, 120, 0.9),
+    rgba(255, 120, 120, 0.9) 4px,
+    rgba(220, 60, 60, 0.9) 4px,
+    rgba(220, 60, 60, 0.9) 8px
+  );
+}
+
+/* 设置面板内的跳过片段管理 */
+.cinema-skip-manage {
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--c-input-bg);
+  border-radius: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.cinema-skip-empty {
+  color: var(--c-text-mute);
+  font-size: 11px;
+  text-align: center;
+  padding: 4px 0;
+}
+
+/* 跳过片段标记按钮（设置面板内） */
+.cinema-skip-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.cinema-skip-action {
+  flex: 1;
+  text-align: center;
+  padding: 4px 0;
+  font-size: 11px;
+  border-radius: 4px;
+  background: var(--c-accent-soft);
+  color: var(--c-text-dim);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cinema-skip-action:hover {
+  background: var(--c-accent-soft-hover);
+  color: var(--c-text);
+}
+
+.cinema-skip-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  margin: 2px 0;
+  border-radius: 4px;
+  background: var(--c-hover-bg);
+  color: var(--c-text-dim);
+  font-size: 11px;
+}
+
+.cinema-skip-del {
+  color: var(--c-text-faint);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.cinema-skip-del:hover {
+  color: #ff5c5c;
+}
+
+.cinema-skip-clear {
+  text-align: center;
+  color: rgba(255, 120, 120, 0.8);
+  font-size: 11px;
+  padding: 4px 0;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.cinema-skip-clear:hover {
+  color: #ff5c5c;
+}
+
+/* ============================================================
+   观影记录面板（点击状态徽章打开）
+   ============================================================ */
+
+#cinema-history-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999990;
+  background: var(--c-overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  animation: cinema-history-overlay-in 0.2s ease-out;
+}
+
+.cinema-history-panel {
+  width: 480px;
+  max-width: 90vw;
+  max-height: 70vh;
+  background: var(--c-panel-bg);
+  border: 1px solid var(--c-panel-border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  animation: cinema-history-panel-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 历史面板入场：overlay 淡入 + 面板 pop（scale+translateY） */
+@keyframes cinema-history-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cinema-history-panel-in {
+  from { opacity: 0; transform: scale(0.94) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.cinema-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  color: var(--c-text);
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--c-divider);
+}
+
+.cinema-history-close {
+  color: var(--c-text-faint);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.cinema-history-close:hover {
+  color: var(--c-text);
+}
+
+.cinema-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cinema-history-action {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--c-text-faint);
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--c-input-bg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cinema-history-action:hover {
+  color: var(--c-text);
+  background: var(--c-row-hover);
+}
+
+.cinema-history-action-danger:hover {
+  color: #ff5c5c;
+}
+
+.cinema-history-list {
+  overflow-y: auto;
+  padding: 8px;
+  min-height: 120px;
+}
+
+.cinema-history-empty {
+  color: var(--c-text-mute);
+  font-size: 12px;
+  text-align: center;
+  padding: 30px 0;
+}
+
+.cinema-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cinema-history-item:hover {
+  background: var(--c-hover-bg);
+}
+
+.cinema-history-pic {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--c-hover-bg);
+  flex-shrink: 0;
+}
+
+.cinema-history-pic-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-text-mute);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.cinema-history-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.cinema-history-name {
+  color: var(--c-text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.cinema-history-meta {
+  color: var(--c-text-faint);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.cinema-history-progress {
+  height: 3px;
+  background: var(--c-input-bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cinema-history-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--c-accent), var(--c-accent-hover));
+  border-radius: 2px;
+}
+
+.cinema-history-del {
+  color: var(--c-text-mute);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+.cinema-history-del:hover {
+  color: #ff5c5c;
+}
+
+/* 历史条目收藏星标（★ 已收藏 / ☆ 未收藏；不参与行跳转） */
+.cinema-history-star {
+  color: var(--c-text-mute);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 5px;
+  flex-shrink: 0;
+  transition: color 0.15s ease, transform 0.1s ease;
+}
+
+.cinema-history-star:hover {
+  color: var(--c-accent-hover);
+  transform: scale(1.15);
+}
+
+.cinema-history-star.active {
+  color: #f0b90b;
+}
+
+/* ============================================================
+  观影统计行（历史面板顶部）
+  ============================================================ */
+
+.cinema-stat-row {
+  padding: 8px 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--c-text-faint);
+  border-bottom: 1px solid var(--c-divider);
+}
+
+/* ============================================================
+  播放完毕自动关闭标签页提示气泡
+  ============================================================ */
+
+.cinema-close-tip {
+  position: fixed;
+  right: 16px;
+  bottom: 90px;
+  z-index: 999999;
+  min-width: 260px;
+  padding: 12px 14px;
+  background: var(--c-panel-bg);
+  border: 1px solid var(--c-accent-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  color: var(--c-text);
+  animation: cinema-close-tip-in 0.2s ease-out;
+}
+
+.cinema-close-tip-text {
+  margin-bottom: 10px;
+}
+
+.cinema-close-count {
+  color: var(--c-accent-hover);
+  font-weight: 700;
+}
+
+.cinema-close-tip-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cinema-close-tip-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cinema-close-tip-ok {
+  background: var(--c-accent);
+  color: var(--c-text);
+}
+
+.cinema-close-tip-ok:hover {
+  background: var(--c-accent-hover);
+}
+
+.cinema-close-tip-cancel {
+  background: var(--c-input-bg);
+  color: var(--c-text);
+}
+
+.cinema-close-tip-cancel:hover {
+  background: var(--c-hover-bg);
+}
+
+@keyframes cinema-close-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   切P失败恢复卡片（切换超时未确认时展示）
+   ============================================================ */
+
+#cinema-switch-recovery {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 999999;
+  min-width: 260px;
+  max-width: 90vw;
+  padding: 18px 22px;
+  background: var(--c-panel-bg);
+  border: 1px solid var(--c-accent-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  animation: cinema-switch-recovery-in 0.2s ease-out;
+}
+
+.cinema-switch-recovery-title {
+  color: var(--c-text);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.cinema-switch-recovery-sub {
+  color: var(--c-text-faint);
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+
+.cinema-switch-recovery-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.cinema-switch-recovery-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cinema-switch-recovery-btn-primary {
+  background: var(--c-accent);
+  color: var(--c-text);
+}
+
+.cinema-switch-recovery-btn-primary:hover {
+  background: var(--c-accent-hover);
+}
+
+.cinema-switch-recovery-btn-ghost {
+  background: var(--c-input-bg);
+  color: var(--c-text);
+}
+
+.cinema-switch-recovery-btn-ghost:hover {
+  background: var(--c-hover-bg);
+}
+
+@keyframes cinema-switch-recovery-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ============================================================
+   观影记录续播文案（A4）
+   ============================================================ */
+
+.cinema-history-resume {
+  color: var(--c-accent);
+  font-weight: 600;
+}
+
+/* ============================================================
+   首次使用引导弹窗（A6）
+   ============================================================ */
+
+.cinema-onboarding-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999991;
+  background: var(--c-overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  animation: cinema-history-overlay-in 0.2s ease-out;
+}
+
+.cinema-onboarding-card {
+  width: 340px;
+  max-width: 100%;
+  background: var(--c-panel-bg);
+  border: 1px solid var(--c-accent-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  padding: 22px 24px 18px;
+  animation: cinema-history-panel-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cinema-onboarding-title {
+  color: var(--c-text);
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.cinema-onboarding-steps {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  color: var(--c-text-dim);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.cinema-onboarding-steps li {
+  padding-left: 18px;
+  position: relative;
+}
+
+.cinema-onboarding-steps li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 11px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+
+.cinema-onboarding-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 0;
+  background: var(--c-accent);
+  color: var(--c-text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cinema-onboarding-btn:hover {
+  background: var(--c-accent-hover);
+}
+
+/* ============================================================
+   关灯模式（压暗播放器外区域 + 影院荧幕氛围光 + 胶片暗角）
+   ============================================================ */
+
+#cinema-lights-out {
+  position: fixed;
+  z-index: 9998;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, var(--cinema-lights-out-opacity, 0.85));
+}
+
+#cinema-lights-out.on {
+  opacity: 1;
+}
+
+/* 影院荧幕氛围光（Ambilight 动态流光）：提取视频边缘色彩向黑边与四周投射环境光 */
+#cinema-ambilight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#cinema-ambilight.active {
+  opacity: 0.88;
+}
+
+#cinema-ambilight-canvas {
+  position: absolute;
+  top: -15%;
+  left: -15%;
+  width: 130%;
+  height: 130%;
+  filter: blur(55px) brightness(1.3) saturate(1.6);
+  transform: scale(1.12);
+  transform-origin: center center;
+}
+
+/* 电影级胶片暗角与聚光景深（Cinematic Vignette & Spotlight） */
+#cinema-vignette {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4; /* 位于视频上层、HUD 控件下层 */
+  opacity: 0;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 42%,
+    rgba(0, 0, 0, 0.28) 72%,
+    rgba(0, 0, 0, 0.78) 100%
+  );
+  box-shadow: inset 0 0 100px 30px rgba(0, 0, 0, 0.8);
+}
+
+#cinema-vignette.active {
+  opacity: 1;
+}
+
+/* 纯净暗场与影院模式去干扰：在影院模式开启、闲置或全屏暗场播放时，彻底隐藏/淡化右上角 UP 主名称与 Bilibili 水印 */
+body.cinema-active .bpx-player-watermark,
+body.cinema-active .bpx-player-watermark-image,
+body.cinema-active .bilibili-player-watermark,
+body.cinema-active .bpx-player-top-issue,
+body.cinema-active .bpx-player-video-top,
+body.cinema-active .bpx-player-video-top-issue,
+body.cinema-active .bpx-player-top-wrap,
+body.cinema-active .bpx-player-cmd-dm-wrap,
+body.cinema-active [class*="player-watermark"],
+body.cinema-active [class*="bpx-player-watermark"],
+body.cinema-active [class*="squirtle-watermark"],
+body.cinema-active .squirtle-watermark,
+body.cinema-active .squirtle-video-top,
+body.cinema-active .squirtle-top,
+body.cinema-active [class*="watermark"],
+body.cinema-active img[src*="watermark"],
+body.cinema-active [class*="top-issue"],
+.cinema-active .bpx-player-watermark,
+.cinema-active .bpx-player-watermark-image,
+.cinema-active .bilibili-player-watermark,
+.cinema-active .bpx-player-top-issue,
+.cinema-active .bpx-player-video-top,
+.cinema-active .bpx-player-video-top-issue,
+.cinema-active .bpx-player-top-wrap,
+.cinema-active .bpx-player-cmd-dm-wrap,
+.cinema-active [class*="player-watermark"],
+.cinema-active [class*="bpx-player-watermark"],
+.cinema-active [class*="squirtle-watermark"],
+.cinema-active .squirtle-watermark,
+.cinema-active .squirtle-video-top,
+.cinema-active .squirtle-top,
+.cinema-active [class*="watermark"],
+.cinema-active img[src*="watermark"],
+.cinema-active [class*="top-issue"],
+body.cinema-idle .bpx-player-watermark,
+body.cinema-idle .bpx-player-watermark-image,
+body.cinema-idle .bilibili-player-watermark,
+body.cinema-idle .bilibili-player-video-top,
+body.cinema-idle .bpx-player-top-issue,
+body.cinema-idle .bpx-player-video-top,
+body.cinema-idle .bpx-player-video-top-issue,
+body.cinema-idle .bpx-player-top-wrap,
+body.cinema-idle .bpx-player-cmd-dm-wrap,
+body.cinema-idle [class*="player-watermark"],
+body.cinema-idle [class*="bpx-player-watermark"],
+body.cinema-idle [class*="squirtle-watermark"],
+body.cinema-idle .squirtle-video-top,
+body.cinema-idle .squirtle-top,
+body.cinema-idle [class*="watermark"],
+body.cinema-idle img[src*="watermark"],
+body.cinema-idle [class*="top-issue"],
+.cinema-idle .bpx-player-watermark,
+.cinema-idle .bpx-player-watermark-image,
+.cinema-idle .bilibili-player-watermark,
+.cinema-idle .bilibili-player-video-top,
+.cinema-idle .bpx-player-top-issue,
+.cinema-idle .bpx-player-video-top,
+.cinema-idle .bpx-player-video-top-issue,
+.cinema-idle .bpx-player-top-wrap,
+.cinema-idle .bpx-player-cmd-dm-wrap,
+.cinema-idle [class*="player-watermark"],
+.cinema-idle [class*="bpx-player-watermark"],
+.cinema-idle [class*="squirtle-watermark"],
+.cinema-idle .squirtle-video-top,
+.cinema-idle .squirtle-top,
+.cinema-idle [class*="watermark"],
+.cinema-idle img[src*="watermark"],
+.cinema-idle [class*="top-issue"],
+body.cinema-lights-out-active .bpx-player-watermark,
+body.cinema-lights-out-active .bpx-player-watermark-image,
+body.cinema-lights-out-active .bilibili-player-watermark,
+body.cinema-lights-out-active .bilibili-player-video-top,
+body.cinema-lights-out-active .bpx-player-top-issue,
+body.cinema-lights-out-active .bpx-player-video-top,
+body.cinema-lights-out-active .bpx-player-video-top-issue,
+body.cinema-lights-out-active .bpx-player-top-wrap,
+body.cinema-lights-out-active .bpx-player-cmd-dm-wrap,
+body.cinema-lights-out-active [class*="player-watermark"],
+body.cinema-lights-out-active [class*="bpx-player-watermark"],
+body.cinema-lights-out-active [class*="squirtle-watermark"],
+body.cinema-lights-out-active .squirtle-video-top,
+body.cinema-lights-out-active .squirtle-top,
+body.cinema-lights-out-active [class*="watermark"],
+body.cinema-lights-out-active img[src*="watermark"],
+body.cinema-lights-out-active [class*="top-issue"],
+.cinema-lights-out-active .bpx-player-watermark,
+.cinema-lights-out-active .bpx-player-watermark-image,
+.cinema-lights-out-active .bilibili-player-watermark,
+.cinema-lights-out-active .bilibili-player-video-top,
+.cinema-lights-out-active .bpx-player-top-issue,
+.cinema-lights-out-active .bpx-player-video-top,
+.cinema-lights-out-active .bpx-player-video-top-issue,
+.cinema-lights-out-active .bpx-player-top-wrap,
+.cinema-lights-out-active .bpx-player-cmd-dm-wrap,
+.cinema-lights-out-active [class*="player-watermark"],
+.cinema-lights-out-active [class*="bpx-player-watermark"],
+.cinema-lights-out-active [class*="squirtle-watermark"],
+.cinema-lights-out-active .squirtle-video-top,
+.cinema-lights-out-active .squirtle-top,
+.cinema-lights-out-active [class*="watermark"],
+.cinema-lights-out-active img[src*="watermark"],
+.cinema-lights-out-active [class*="top-issue"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* ============================================================
+   排除模式恢复入口（B12：被排除视频右下角小chip，样式与徽章一致）
+   ============================================================ */
+
+#cinema-excluded-stub {
+  position: fixed;
+  right: 20px;
+  bottom: 64px;
+  z-index: 99999;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--c-panel-bg);
+  border: 1px solid var(--c-accent-border);
+  color: var(--c-text);
+  cursor: pointer;
+  opacity: 0.95;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#cinema-excluded-stub:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+  border-color: var(--c-accent);
+}

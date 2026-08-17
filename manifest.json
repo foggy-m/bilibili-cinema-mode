@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "B站影院模式 - 分P无缝连播",
+  "version": "1.10.0",
+  "description": "将B站分P视频整合为一部完整电影：无缝自动连播、统一进度条（10种炫彩样式/章节着色/拖拽/画面预览/键盘控制）、隐藏分P界面、记忆播放进度、跨标签页与跨设备同步进度/跳过片段/观影记录、跳过片头片尾、关灯模式、幕间标题卡过渡、冻结帧零黑屏切换、音量淡入淡出、播完下一部、极致快速切换（合集模式同样生效）、切P失败一键恢复、片尾卡防原生自动连播劫持、收藏与弹窗控制",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "B站影院模式",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.bilibili.com/video/*"
+      ],
+      "js": [
+        "cinema-utils.js",
+        "player-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "*://www.bilibili.com/video/*"
+      ],
+      "js": [
+        "cinema-utils.js",
+        "cinema-core.js",
+        "cinema-player.js",
+        "cinema-skips.js",
+        "cinema-ui.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

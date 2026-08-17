@@ -1,0 +1,475 @@
+/* ============================================================
+   B站影院模式 - 工具栏弹窗样式（流媒体微型中枢风格）
+   ============================================================ */
+
+:root {
+  --p-panel-bg: #0c0e14;
+  --p-panel-card: rgba(255, 255, 255, 0.05);
+  --p-panel-border: rgba(255, 255, 255, 0.1);
+  --p-text: #fff;
+  --p-text-dim: rgba(255, 255, 255, 0.85);
+  --p-text-faint: rgba(255, 255, 255, 0.55);
+  --p-text-mute: rgba(255, 255, 255, 0.38);
+  --p-accent: #00a1d6;
+  --p-accent-hover: #00b5e5;
+  --p-accent-soft: rgba(0, 161, 214, 0.2);
+  --p-accent-soft-hover: rgba(0, 161, 214, 0.4);
+  --p-input-bg: rgba(255, 255, 255, 0.08);
+  --p-input-border: rgba(255, 255, 255, 0.16);
+  --p-hover-bg: rgba(255, 255, 255, 0.07);
+  --p-divider: rgba(255, 255, 255, 0.08);
+  --p-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --p-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+body.theme-light {
+  --p-panel-bg: #f8fafc;
+  --p-panel-card: #ffffff;
+  --p-panel-border: rgba(0, 0, 0, 0.09);
+  --p-text: #0f172a;
+  --p-text-dim: rgba(15, 23, 42, 0.85);
+  --p-text-faint: rgba(15, 23, 42, 0.6);
+  --p-text-mute: rgba(15, 23, 42, 0.4);
+  --p-accent: #00a1d6;
+  --p-accent-hover: #00b5e5;
+  --p-accent-soft: rgba(0, 161, 214, 0.12);
+  --p-accent-soft-hover: rgba(0, 161, 214, 0.25);
+  --p-input-bg: rgba(0, 0, 0, 0.04);
+  --p-input-border: rgba(0, 0, 0, 0.12);
+  --p-hover-bg: rgba(0, 0, 0, 0.05);
+  --p-divider: rgba(0, 0, 0, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: #0c0e14;
+  background-color: var(--p-panel-bg);
+  width: 330px;
+}
+
+body {
+  width: 330px;
+  background: #0c0e14;
+  background-color: var(--p-panel-bg);
+  color: var(--p-text);
+  font-family: var(--p-font-sans);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.cinema-popup {
+  display: flex;
+  flex-direction: column;
+  max-height: 580px;
+  background: var(--p-panel-bg);
+}
+
+/* ---------- 头部 ---------- */
+.cinema-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+  border-bottom: 1px solid var(--p-divider);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cinema-popup-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cinema-popup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--p-accent);
+  box-shadow: 0 0 8px var(--p-accent);
+  animation: cinema-popup-dot-pulse 2s infinite ease-in-out;
+}
+
+@keyframes cinema-popup-dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+}
+
+.cinema-popup-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.cinema-popup-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--p-accent-soft);
+  color: var(--p-accent-hover);
+  letter-spacing: 0.5px;
+}
+
+/* 开关（switch） */
+.cinema-popup-switch {
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.cinema-popup-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.cinema-popup-switch-track {
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--p-input-bg);
+  border: 1px solid var(--p-input-border);
+  position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.cinema-popup-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--p-text-faint);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+}
+
+.cinema-popup-switch input:checked + .cinema-popup-switch-track {
+  background: var(--p-accent);
+  border-color: var(--p-accent);
+}
+
+.cinema-popup-switch input:checked + .cinema-popup-switch-track .cinema-popup-switch-thumb {
+  transform: translateX(16px);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.cinema-popup-switch input:focus-visible + .cinema-popup-switch-track {
+  outline: 2px solid var(--p-accent);
+  outline-offset: 2px;
+}
+
+/* ---------- 区块 ---------- */
+.cinema-popup-section {
+  padding: 8px 12px 2px;
+}
+
+.cinema-popup-section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--p-text-faint);
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.cinema-popup-section-title svg {
+  opacity: 0.8;
+  color: var(--p-accent);
+}
+
+/* ---------- Hero 当前视频卡片 ---------- */
+.cinema-current-hero {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--p-panel-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  background: #11141d;
+  margin-bottom: 4px;
+}
+
+.cinema-hero-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(2px) brightness(0.65);
+  transform: scale(1.08) translateZ(0);
+  transition: transform 0.3s ease;
+  will-change: transform;
+}
+
+.cinema-current-hero:hover .cinema-hero-backdrop {
+  transform: scale(1.12) translateZ(0);
+}
+
+.cinema-hero-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(12, 14, 20, 0.3) 0%, rgba(12, 14, 20, 0.85) 55%, rgba(12, 14, 20, 0.98) 100%);
+}
+
+.cinema-hero-content {
+  position: relative;
+  z-index: 1;
+  padding: 10px 12px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cinema-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--p-accent-hover);
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.cinema-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+}
+
+.cinema-hero-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+.cinema-hero-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 8px;
+}
+
+.cinema-hero-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cinema-hero-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cinema-hero-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00a1d6, #00b5e5);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.cinema-hero-pct {
+  font-family: var(--p-font-mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.cinema-hero-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cinema-hero-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-family: var(--p-font-sans);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.cinema-hero-btn-primary {
+  flex: 1;
+  background: var(--p-accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(0, 161, 214, 0.4);
+}
+
+.cinema-hero-btn-primary:hover {
+  background: var(--p-accent-hover);
+  box-shadow: 0 4px 14px rgba(0, 161, 214, 0.55);
+  transform: translateY(-1px);
+}
+
+.cinema-hero-btn-primary:active {
+  transform: translateY(0);
+}
+
+.cinema-hero-btn-ghost {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--p-text-dim);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(4px);
+}
+
+.cinema-hero-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.cinema-hero-btn-ghost.active {
+  background: var(--p-accent-soft);
+  border-color: var(--p-accent);
+  color: var(--p-accent-hover);
+}
+
+.cinema-hero-star {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ---------- 列表与条目 ---------- */
+.cinema-popup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  contain: paint;
+  margin-bottom: 4px;
+  background: transparent;
+}
+
+.cinema-popup-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.cinema-popup-list::-webkit-scrollbar-thumb {
+  background: var(--p-input-border);
+  border-radius: 3px;
+}
+
+.cinema-popup-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: var(--p-panel-card);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
+}
+
+.cinema-popup-item:hover {
+  background: var(--p-hover-bg);
+  border-color: var(--p-panel-border);
+  transform: translateX(1px);
+}
+
+.cinema-popup-item:focus-visible {
+  outline: 2px solid var(--p-accent);
+  outline-offset: -1px;
+}
+
+.cinema-popup-item-pic {
+  width: 58px;
+  height: 35px;
+  border-radius: 4px;
+  background: var(--p-hover-bg);
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--p-text-mute);
+  position: relative;
+}
+
+.cinema-popup-item-pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cinema-popup-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.cinema-popup-item-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--p-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cinema-popup-item-sub {
+  font-size: 10px;
+  color: var(--p-text-faint);
+  margin-top: 2px;
+}
+
+.cinema-popup-item-remove {
+  border: none;
+  background: none;
+  color: var(--p-text-mute);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.cinema-popup-item-remove:hover {
+  color: #ff5c5c;
+  background: rgba(255, 92, 92, 0.12);
+}
+
+/* ---------- 空状态 ---------- */
+.cinema-popup-empty {
+  padding: 10px 0;
+  text-align: center;
+  color: var(--p-text-mute);
+  font-size: 11px;
+}

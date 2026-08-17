@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <title>影院模式</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="cinema-popup">
+
+    <header class="cinema-popup-header">
+      <div class="cinema-popup-brand">
+        <span class="cinema-popup-dot" aria-hidden="true"></span>
+        <span class="cinema-popup-title">影院模式</span>
+        <span class="cinema-popup-tag">CINEMA</span>
+      </div>
+      <label class="cinema-popup-switch" title="启用/停用影院模式">
+        <input type="checkbox" id="cinema-enable-toggle" role="switch" aria-label="启用影院模式">
+        <span class="cinema-popup-switch-track" aria-hidden="true"><span class="cinema-popup-switch-thumb"></span></span>
+      </label>
+    </header>
+
+    <!-- Hero 当前视频放映卡片 -->
+    <section class="cinema-popup-section" id="cinema-current-section">
+      <div class="cinema-current-hero" id="cinema-current">
+        <div class="cinema-hero-backdrop" id="cinema-current-backdrop"></div>
+        <div class="cinema-hero-overlay"></div>
+        <div class="cinema-hero-content">
+          <div class="cinema-hero-badge">
+            <span class="cinema-live-dot"></span>
+            <span>当前放映</span>
+          </div>
+          <div class="cinema-hero-title" id="cinema-current-title"></div>
+          <div class="cinema-hero-sub" id="cinema-current-sub"></div>
+          <div class="cinema-hero-progress" id="cinema-hero-prog-row">
+            <div class="cinema-hero-bar"><div class="cinema-hero-fill" id="cinema-hero-fill"></div></div>
+            <span class="cinema-hero-pct" id="cinema-hero-pct"></span>
+          </div>
+          <div class="cinema-hero-actions">
+            <button type="button" class="cinema-hero-btn cinema-hero-btn-primary" id="cinema-current-open">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>继续观影</span>
+            </button>
+            <button type="button" class="cinema-hero-btn cinema-hero-btn-ghost" id="cinema-current-bookmark">
+              <span class="cinema-hero-star">★</span>
+              <span class="cinema-hero-bm-text">收藏</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 最近放映 -->
+    <section class="cinema-popup-section">
+      <div class="cinema-popup-section-title">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>最近放映</span>
+      </div>
+      <div class="cinema-popup-list" id="cinema-recent-list"></div>
+    </section>
+
+    <!-- 我的收藏 -->
+    <section class="cinema-popup-section">
+      <div class="cinema-popup-section-title">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>我的收藏</span>
+      </div>
+      <div class="cinema-popup-list" id="cinema-bookmark-list"></div>
+    </section>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

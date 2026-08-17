@@ -768,7 +768,7 @@ flowchart TD
 
 1. 打开 Chrome / Edge（或其他 Chromium 内核浏览器）的扩展管理页（`chrome://extensions`）
 2. 开启右上角「开发者模式」
-3. 点击「加载已解压的扩展程序」，选择 `d:\bilibili-cinema-mode` 目录
+3. 点击「加载已解压的扩展程序」，选择插件根目录
 4. 访问任意 `www.bilibili.com/video/BV...` 页面，右下角出现状态徽章即生效
 
 ### 10.2 使用要点

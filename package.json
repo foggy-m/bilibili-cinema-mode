@@ -1,6 +1,6 @@
 {
   "name": "bilibili-cinema-mode",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "将B站分P与合集视频整合为单部电影体验的浏览器扩展（Manifest V3）",
   "main": "content.js",
   "scripts": {

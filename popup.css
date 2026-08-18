@@ -44,6 +44,43 @@ body.theme-light {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--p-input-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 0px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--p-input-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--p-text-faint);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+  display: none;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+::-webkit-scrollbar:horizontal {
+  display: none;
+  height: 0;
+  width: 0;
 }
 
 html {
@@ -365,22 +402,14 @@ body {
 .cinema-popup-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-height: 180px;
+  gap: 4px;
+  max-height: 175px;
   overflow-y: auto;
+  overflow-x: hidden !important;
   overscroll-behavior: contain;
-  contain: paint;
   margin-bottom: 4px;
+  padding-right: 2px;
   background: transparent;
-}
-
-.cinema-popup-list::-webkit-scrollbar {
-  width: 5px;
-}
-
-.cinema-popup-list::-webkit-scrollbar-thumb {
-  background: var(--p-input-border);
-  border-radius: 3px;
 }
 
 .cinema-popup-item {
@@ -392,13 +421,14 @@ body {
   background: var(--p-panel-card);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
+  width: 100%;
+  box-sizing: border-box;
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
 }
 
 .cinema-popup-item:hover {
   background: var(--p-hover-bg);
   border-color: var(--p-panel-border);
-  transform: translateX(1px);
 }
 
 .cinema-popup-item:focus-visible {

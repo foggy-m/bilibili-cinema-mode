@@ -3,7 +3,7 @@
  * 初始化流程、SPA 导航监听、播放器容器变化监听、清理
  *
  * 依赖（manifest 按序注入，共享隔离世界全局作用域）：
- *   cinema-core.js → cinema-player.js → cinema-skips.js → cinema-ui.js → content.js
+ *   cinema-core.js → cinema-player.js → cinema-ui.js → content.js
  */
 
 'use strict';
@@ -12,8 +12,7 @@
 //  SPA 导航监听
 // ============================================================
 
-// B12：导航观察器幂等标记 —— 排除模式也会注册导航观察器（保证从被排除视频 SPA
-// 跳转到未排除视频时能自动恢复完整模式）；因底层 pushState/popstate 钩子从不移除，
+// 导航观察器幂等标记：底层 pushState/popstate 钩子从不移除，
 // 故该标记跨 cleanup 保持 true，防止重复包装/重复 interval 堆叠。
 let navObserverHooked = false;
 
@@ -63,17 +62,6 @@ function onNavigate() {
   // URL 中间态保护：SPA 导航期间 pathname 可能短暂不完整（getBvid 返回空），跳过本次检查
   if (!newBvid) return;
 
-  // B12：目标视频被排除时不做任何播放器接线；跨视频则走 cleanup+reinit（门禁负责展示 stub）
-  if (isBvidExcluded(newBvid)) {
-    if (newBvid !== state.bvid) {
-      log('导航到已排除视频，清理并展示最小入口');
-      if (typeof hideSwitchRecovery === 'function') hideSwitchRecovery();
-      cleanup();
-      setTimeout(init, 500);
-    }
-    return;
-  }
-
   // 合集模式：检查新 bvid 是否属于同一 season
   if (state.mode === 'season' && state.seasonEpisodes.length > 0) {
     const epIndex = state.seasonEpisodes.findIndex((ep) => ep.bvid === newBvid);
@@ -82,8 +70,13 @@ function onNavigate() {
       if (epIndex !== state.currentIndex && !state.switching && !state.restoringProgress) {
         state.currentIndex = epIndex;
         state.bvid = newBvid;
+        // 同步 cid/aid，避免同一 season 内导航后 state.cid/state.aid 停留在旧剧集
+        const ep = state.seasonEpisodes[epIndex];
+        if (ep) {
+          if (ep.cid != null) state.cid = ep.cid;
+          if (ep.aid != null) state.aid = ep.aid;
+        }
         refreshVideoElement();
-        updatePartIndicator();
         updateUnifiedProgress();
         // 手动导航已落地：收起可能残留的切P失败恢复卡
         if (typeof hideSwitchRecovery === 'function') hideSwitchRecovery();
@@ -103,7 +96,6 @@ function onNavigate() {
     // 同一视频但P数变了（可能是用户手动点击了分P）
     state.currentIndex = newPage - 1;
     refreshVideoElement();
-    updatePartIndicator();
     updateUnifiedProgress();
     // 手动导航已落地：收起可能残留的切P失败恢复卡
     if (typeof hideSwitchRecovery === 'function') hideSwitchRecovery();
@@ -187,7 +179,6 @@ async function init() {
   if (state.initialized) return;
 
   log('初始化...');
-  showStatusBadge('影院模式：初始化中...', 'info');
 
   await loadSettings();
 
@@ -218,21 +209,7 @@ async function init() {
 async function proceed() {
   state.bvid = state.bvid || getBvid();
 
-  // B12 排除门禁：被排除的视频不创建完整 UI、不挂载切换/预取/快捷键，仅保留最小恢复入口。
-  // 成功初始化路径与排除路径都会应用主题（applyCinemaTheme 幂等）。
   applyCinemaTheme();
-  if (isCurrentVideoExcluded()) {
-    log('此视频已排除影院模式，仅显示最小恢复入口');
-    setupNavigationObserver(); // 保留 SPA 导航能力：跳转到未排除视频时自动恢复完整模式
-    // 覆盖"初始化中"徽章文本，保持排除提示常驻（不调用 hideStatusBadge 隐藏）
-    if (typeof showStatusBadge === 'function') {
-      showStatusBadge('此视频已排除影院模式', 'info');
-    }
-    if (typeof showExcludedStub === 'function') {
-      showExcludedStub();
-    }
-    return;
-  }
 
   // 合集模式：通过当前 bvid 确定当前集索引
   if (state.mode === 'season') {
@@ -241,8 +218,6 @@ async function proceed() {
   } else {
     state.currentIndex = getCurrentPage() - 1;
   }
-  // C16：合集索引已知后重算"播完下一部"候选（幂等；extractPageData 已算过一次）
-  resolveNextWork();
 
   state.isMultiPart = state.pages.length > 1;
 
@@ -288,18 +263,6 @@ async function onVideoFound() {
   // 预热收藏缓存（C16：页面内 isBookmarked/toggleBookmark 需要同步可读）
   readBookmarks(() => {});
 
-  // 加载跳过片段
-  await loadSkips();
-  renderSkipMarkers();
-  updateSkipManageList();
-
-  // 加载当前视频的片头/片尾时长覆盖
-  await loadIntroOutro();
-  refreshIntroOutroInputs();
-
-  // 注册跳过片段快捷键
-  setupSkipShortcuts();
-
   // 全局快捷键（键盘可访问性）
   setupCinemaShortcuts();
 
@@ -312,11 +275,20 @@ async function onVideoFound() {
   window.addEventListener('scroll', updateLightsOut, true);
 
   // 跨标签页/跨设备进度同步（chrome.storage.onChanged，处理 local 与 sync 两个区域）
+  // B3：init 重试/并发可能重复走到这里，先移除旧监听再注册，
+  // 避免句柄被 state.progressSyncHandler 覆盖后 cleanup 只能移除最后一个
+  if (state.progressSyncHandler) {
+    chrome.storage.onChanged.removeListener(state.progressSyncHandler);
+  }
   state.progressSyncHandler = onProgressStorageChanged;
   chrome.storage.onChanged.addListener(state.progressSyncHandler);
 
   // 设置/收藏变更同步：弹窗 setEnabled / toggleBookmark 等后台写入即时生效。
   // 用存储最新值合并进内存 settings，本页后续 saveSettings 不会再把它"回退"掉。
+  // B3：先移除旧监听再注册（见上方 progressSyncHandler 注释）
+  if (state.settingsSyncHandler) {
+    chrome.storage.onChanged.removeListener(state.settingsSyncHandler);
+  }
   state.settingsSyncHandler = (changes, area) => {
     if (area !== 'sync') return;
     try {
@@ -339,16 +311,6 @@ async function onVideoFound() {
 
   state.initialized = true;
   log('影院模式就绪');
-
-  // 显示成功状态
-  const modeText = state.mode === 'season' ? '合集模式' : '分P模式';
-  const countText = state.isMultiPart ? `${state.pages.length}集` : '单集';
-  showStatusBadge(`影院模式已启用 · ${modeText} · ${countText}`, 'success');
-
-  // 首次运行引导（仅多P视频，完成后写入 onboardingDone）
-  if (!settings.onboardingDone && state.isMultiPart && typeof showOnboarding === 'function') {
-    showOnboarding();
-  }
 
   // 恢复播放进度（B11：多P与单集视频都恢复；单集只 seek 播放位置，不做分P跳转）
   await restoreProgress();
@@ -375,7 +337,6 @@ async function onVideoFound() {
 }
 
 function cleanup() {
-  if (state.transitionTimer) clearTimeout(state.transitionTimer);
   if (state.observer) state.observer.disconnect();
   if (state.observerTop) state.observerTop.disconnect();
   detachVideoListeners();
@@ -389,19 +350,11 @@ function cleanup() {
     'cinema-bottom-progress',
     'cinema-active',
     'cinema-multi-part',
-    'cinema-hide-parts',
     'cinema-season-mode',
-    'cinema-idle',
     'cinema-lights-out-active'
   );
   if (state.playerWrap) {
-    state.playerWrap.classList.remove('cinema-lights-out-active', 'cinema-idle', 'cinema-active');
-  }
-  if (typeof stopAmbilightLoop === 'function') {
-    stopAmbilightLoop();
-  }
-  if (typeof clearIdleTimer === 'function') {
-    clearIdleTimer();
+    state.playerWrap.classList.remove('cinema-lights-out-active', 'cinema-active');
   }
   if (typeof onPanelEscape === 'function') {
     document.removeEventListener('keydown', onPanelEscape);
@@ -417,8 +370,15 @@ function cleanup() {
     ui[key] = null;
   }
 
+  // B2：移除播放器容器上复用的 wrap 监听（dblclick），
+  // 防止 SPA 复用容器时下次 createUI 前残留旧句柄
+  if (typeof removeUiWrapListeners === 'function') {
+    removeUiWrapListeners();
+  }
+
   state.initialized = false;
   state.switching = false;
+  state.switchEpoch = (state.switchEpoch || 0) + 1; // 使切换中残留的 waitForVideoChange(Season) 轮询作废
   state.restoringProgress = false;
   state.video = null;
   state.playerWrap = null;
@@ -434,9 +394,9 @@ function cleanup() {
   state.mode = 'pages';
   state.seasonId = 0;
   state.seasonTitle = '';
+  state.seasonSections = [];
+  state.seasonSectionIndex = -1;
   state.seasonEpisodes = [];
-  state.skips = [];
-  state.skipMarkStart = null;
   state.preloadedCid = null;
   state.preloadFailCount = 0;
   state.onDemandPrefetch = null; // 悬停按需预取去重表：跨视频导航后失效，允许重新预取
@@ -444,7 +404,6 @@ function cleanup() {
   state.lastWatchTick = 0;
   state.closeTipShown = false;
   state.seekDragging = false;
-  state.ioOverride = null;
   if (state.p2pTempTimer) { clearTimeout(state.p2pTempTimer); state.p2pTempTimer = null; }
   state.fadeSnapshot = null;
   state.freezeArmed = false;
@@ -452,19 +411,8 @@ function cleanup() {
   state.preloadFailTs = 0;
   state.preloading = false;
   if (state.prefetchCancelTimer) { clearTimeout(state.prefetchCancelTimer); state.prefetchCancelTimer = null; }
-  if (state.skipKeyHandler) {
-    document.removeEventListener('keydown', state.skipKeyHandler);
-    state.skipKeyHandler = null;
-  }
   teardownCinemaShortcuts();
-  // 快捷键录制状态清理（录制监听器由 cinema-ui 注册/移除，这里兜底）
-  state.shortcutCapturing = false;
-  if (state.shortcutCaptureHandler) {
-    document.removeEventListener('keydown', state.shortcutCaptureHandler);
-    state.shortcutCaptureHandler = null;
-  }
-  state.related = [];
-  state.nextWork = null;
+  if (typeof teardownHoverPrefetch === 'function') teardownHoverPrefetch(); // hover 预取监听（防 SPA 导航后累积）
   if (state.prefetchDoneHandler) {
     window.removeEventListener('__cinema_prefetch_done__', state.prefetchDoneHandler);
     state.prefetchDoneHandler = null;
@@ -477,11 +425,27 @@ function cleanup() {
     chrome.storage.onChanged.removeListener(state.settingsSyncHandler);
     state.settingsSyncHandler = null;
   }
-  closeHistoryPanel();
   closeCloseTabTip();
   if (state.switchRecoveryPoll) { clearInterval(state.switchRecoveryPoll); state.switchRecoveryPoll = null; }
   pageDataPromise = null; // 允许下次重新注入
 }
+
+// ============================================================
+//  popup → content 消息：打开播放器设置面板
+// ============================================================
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (!msg || msg.type !== 'cinema-open-settings') return;
+  // 视频页已初始化但面板尚未创建时先补建（与 onVideoFound → createUI 同一路径）
+  if (!ui.settingsPanel && state.playerWrap && typeof createUI === 'function') {
+    try { createUI(); } catch { /* ignore */ }
+  }
+  // 幂等"打开"：已开着则保持，未开则复用 S 键/双击的同一开面板函数
+  if (ui.settingsPanel && typeof toggleSettingsPanel === 'function' &&
+      !ui.settingsPanel.classList.contains('visible')) {
+    toggleSettingsPanel();
+  }
+});
 
 // ============================================================
 //  启动

@@ -48,10 +48,18 @@ function openVideo(bvid, part) {
 /** 封面图节点（无图或非 http(s) 时退化为首字母占位） */
 function picHtml(pic, cls) {
   if (pic && /^https?:\/\//i.test(pic)) {
-    return `<div class="${cls}"><img src="${esc(pic)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentElement.innerHTML='B'"></div>`;
+    return `<div class="${cls}"><img src="${esc(pic)}" loading="lazy" referrerpolicy="no-referrer"></div>`;
   }
   return `<div class="${cls}">B</div>`;
 }
+
+// MV3 扩展页 CSP（script-src 'self'）会拦截内联 onerror，改用捕获阶段委托处理封面加载失败
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img && img.tagName === 'IMG' && img.parentElement && /cinema-popup-item-pic/.test(img.parentElement.className || '')) {
+    img.parentElement.innerHTML = 'B';
+  }
+}, true);
 
 // ============================================================
 //  渲染
@@ -61,8 +69,9 @@ function render(data) {
   data = data || {};
   const settings = data.settings || {};
 
-  // 主题：settings.theme === 'light' 用浅色令牌，其余（含 auto/深色）用默认深色
-  document.body.classList.toggle('theme-light', settings.theme === 'light');
+  // 主题（theme 键已删，永远跟随系统）：系统浅色偏好时用浅色令牌
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  document.body.classList.toggle('theme-light', prefersLight);
 
   // 启用开关
   const toggle = $('#cinema-enable-toggle');
@@ -271,6 +280,25 @@ function renderBookmarks(items) {
 
     listEl.appendChild(row);
   }
+}
+
+// ============================================================
+//  打开播放器设置（向视频页 content script 发消息）
+// ============================================================
+
+const openSettingsBtn = $('#cinema-open-settings');
+if (openSettingsBtn) {
+  openSettingsBtn.addEventListener('click', () => {
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs && tabs[0];
+        if (!tab || !tab.id) return;
+        chrome.tabs.sendMessage(tab.id, { type: 'cinema-open-settings' }, () => {
+          void chrome.runtime.lastError; // 非视频页 / 未注入 content script：静默忽略
+        });
+      });
+    } catch { /* ignore */ }
+  });
 }
 
 // ============================================================

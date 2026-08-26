@@ -272,72 +272,7 @@ test('rangeCovered 判断区间是否被覆盖', () => {
   assert.strictEqual(utils.rangeCovered(null, 0, 100), false); // 非法输入
 });
 
-// ========== 进度条重构新增测试：buildChapterGradient / 底栏时间 / 跨P定位 ==========
-
-test('buildChapterGradient 单P或空输入返回空串', () => {
-  assert.strictEqual(utils.buildChapterGradient([], [0], 0), '');
-  assert.strictEqual(utils.buildChapterGradient([{ page: 1 }], [0, 100], 100), '');
-  assert.strictEqual(utils.buildChapterGradient(null, null, 100), '');
-  assert.strictEqual(utils.buildChapterGradient([{ page: 1 }, { page: 2 }], [0, 50, 100], 0), '');
-});
-
-test('buildChapterGradient 多P分段着色与边界分隔', () => {
-  const pages = [{ page: 1, part: '第一集' }, { page: 2, part: '第二集' }];
-  const { cumulative, totalDuration } = utils.buildCumulative([60, 60]);
-  const grad = utils.buildChapterGradient(pages, cumulative, totalDuration);
-  assert.ok(grad.startsWith('linear-gradient(90deg, '));
-  // 校验包含第1段HSL颜色 (187° 48%) 与第2段HSL颜色 (207° 36%)
-  assert.ok(grad.includes('hsl(187, 100%, 48%)'));
-  assert.ok(grad.includes('hsl(207, 100%, 36%)'));
-  // 校验包含分P边界 2px 硬分隔
-  assert.ok(grad.includes('rgba(0, 0, 0, 0.45) 50.000%'));
-  assert.ok(grad.includes('rgba(0, 0, 0, 0.45) calc(50.000% + 2px)'));
-  assert.ok(grad.includes('hsl(207, 100%, 36%) calc(50.000% + 2px)'));
-  assert.ok(grad.includes('hsl(207, 100%, 36%) 100.000%'));
-});
-
-test('buildChapterGradient 3P及以上交替着色', () => {
-  const pages = [{ page: 1 }, { page: 2 }, { page: 3 }];
-  const { cumulative, totalDuration } = utils.buildCumulative([100, 100, 100]);
-  const grad = utils.buildChapterGradient(pages, cumulative, totalDuration);
-  assert.ok(grad.startsWith('linear-gradient(90deg, '));
-  // P1: 0% -> 33.333% (187, 48%)
-  assert.ok(grad.includes('hsl(187, 100%, 48%) 33.333%'));
-  // P2: 33.333% -> 66.667% (207, 36%)
-  assert.ok(grad.includes('hsl(207, 100%, 36%) 66.667%'));
-  // P3: 66.667% -> 100.000% (187, 48%)
-  assert.ok(grad.includes('hsl(187, 100%, 48%) 100.000%'));
-});
-
-test('buildChapterGradient 边界异常输入防御', () => {
-  // cumulative 长度不足 pages.length + 1
-  assert.strictEqual(utils.buildChapterGradient([{ page: 1 }, { page: 2 }], [0], 100), '');
-  // totalDuration 为负数、NaN 或非法类型
-  assert.strictEqual(utils.buildChapterGradient([{ page: 1 }, { page: 2 }], [0, 50, 100], -10), '');
-  assert.strictEqual(utils.buildChapterGradient([{ page: 1 }, { page: 2 }], [0, 50, 100], NaN), '');
-  assert.strictEqual(utils.buildChapterGradient([{ page: 1 }, { page: 2 }], [0, 50, 100], '100'), '');
-  // cumulative 包含 NaN 或负数
-  const grad = utils.buildChapterGradient([{ page: 1 }, { page: 2 }], [0, NaN, 100], 100);
-  assert.ok(!grad.includes('NaN'), 'Gradient must not contain NaN');
-});
-
-test('buildChapterGradient 大分P数量（50+ P）性能与格式正确性', () => {
-  const count = 60;
-  const pages = [];
-  const durations = [];
-  for (let i = 1; i <= count; i++) {
-    pages.push({ page: i, part: `第${i}集` });
-    durations.push(100);
-  }
-  const { cumulative, totalDuration } = utils.buildCumulative(durations);
-  assert.strictEqual(totalDuration, 6000);
-  const grad = utils.buildChapterGradient(pages, cumulative, totalDuration);
-  assert.ok(grad.startsWith('linear-gradient(90deg, '));
-  assert.ok(grad.endsWith('100.000%)'));
-  // 校验包含 59 个边界分隔
-  const boundaryCount = (grad.match(/calc\(/g) || []).length;
-  assert.strictEqual(boundaryCount, (count - 1) * 2);
-});
+// ========== 进度条重构新增测试：底栏时间 / 跨P定位 ==========
 
 test('全剧时间线格式化与底栏时间统合测试', () => {
   const durations = [120, 180, 300]; // 2m + 3m + 5m = 10m (600s)
@@ -408,19 +343,6 @@ test('overallToPartOffset 边界与浮点容差测试', () => {
   assert.strictEqual(utils.overallToPartOffset(cumulative, NaN), null);
 });
 
-test('buildChapterGradient 差异化分P时长与微小分P着色比例', () => {
-  const pages = [{ page: 1 }, { page: 2 }, { page: 3 }];
-  // 5s + 3600s + 10s = 3615s
-  const { cumulative, totalDuration } = utils.buildCumulative([5, 3600, 10]);
-  const grad = utils.buildChapterGradient(pages, cumulative, totalDuration);
-  assert.ok(grad.startsWith('linear-gradient(90deg, '));
-  // P1 约 0.138%
-  assert.ok(grad.includes('0.138%'));
-  // P2 约 99.723%
-  assert.ok(grad.includes('99.723%'));
-  assert.ok(grad.includes('100.000%'));
-});
-
 test('rangeCovered 多区间重叠与断点覆盖', () => {
   const chunks = [
     { start: 0, end: 500 },
@@ -440,21 +362,134 @@ test('formatTime 超长视频（1000+ 小时）格式化', () => {
   assert.strictEqual(utils.formatTime(3600065), '1000:01:05');
 });
 
-test('buildChapterGradient 100P 超大合集分段着色测试', () => {
-  const pages = [];
-  const durations = [];
-  for (let i = 1; i <= 100; i++) {
-    pages.push({ page: i, part: `Episode ${i}` });
-    durations.push(60);
-  }
-  const { cumulative, totalDuration } = utils.buildCumulative(durations);
-  assert.strictEqual(totalDuration, 6000);
-  const grad = utils.buildChapterGradient(pages, cumulative, totalDuration);
-  assert.ok(grad.startsWith('linear-gradient(90deg, '));
-  assert.ok(grad.includes('100.000%'));
-  // 校验包含 99 个边界（198 个 calc 分隔）
-  const boundaryCount = (grad.match(/calc\(/g) || []).length;
-  assert.strictEqual(boundaryCount, 198);
+// ========== 新增：合集子合集模型（每个子合集 = 一部电影）基础函数 ==========
+
+test('buildSeasonModel 多子合集：currentBvid 在第2个子合集', () => {
+  const season = {
+    id: 42,
+    title: '测试合集',
+    sections: [
+      {
+        id: 'sec-1',
+        title: '第一章',
+        episodes: [
+          { bvid: 'BV1', cid: 1, aid: 10, title: 'ep1', duration: 100, id: 'p1' },
+          { bvid: 'BV2', cid: 2, aid: 20, title: 'ep2', duration: 200, id: 'p2' },
+        ],
+      },
+      {
+        id: 'sec-2',
+        title: '第二章',
+        episodes: [
+          { bvid: 'BV3', cid: 3, aid: 30, title: 'ep3', duration: 0, page: { duration: 300 }, id: 'p3' },
+          { bvid: 'BV4', cid: 4, aid: 40, title: 'ep4', duration: 400, id: 'p4' },
+        ],
+      },
+      {
+        id: 'sec-3',
+        title: '第三章',
+        episodes: [{ bvid: 'BV5', cid: 5, aid: 50, title: 'ep5', duration: 500, id: 'p5' }],
+      },
+    ],
+  };
+  const model = utils.buildSeasonModel(season, 'BV4');
+  assert.strictEqual(model.id, 42);
+  assert.strictEqual(model.title, '测试合集');
+  assert.strictEqual(model.sectionIndex, 1);
+  assert.strictEqual(model.sections.length, 3);
+  // 第1个子合集原样保留，index 为 section 内 0 起
+  assert.deepStrictEqual(model.sections[0].episodes, [
+    { index: 0, bvid: 'BV1', cid: 1, aid: 10, title: 'ep1', duration: 100, id: 'p1' },
+    { index: 1, bvid: 'BV2', cid: 2, aid: 20, title: 'ep2', duration: 200, id: 'p2' },
+  ]);
+  // 第2个子合集为当前：episodes 即其集数列表，duration 兜底 page.duration
+  assert.deepStrictEqual(model.episodes, [
+    { index: 0, bvid: 'BV3', cid: 3, aid: 30, title: 'ep3', duration: 300, id: 'p3' },
+    { index: 1, bvid: 'BV4', cid: 4, aid: 40, title: 'ep4', duration: 400, id: 'p4' },
+  ]);
+  assert.deepStrictEqual(model.sections[1], { id: 'sec-2', title: '第二章', index: 1, episodes: model.episodes });
+  assert.strictEqual(model.sections[2].index, 2);
+  assert.strictEqual(model.sections[2].episodes.length, 1);
+});
+
+test('buildSeasonModel currentBvid 未找到 → sectionIndex -1 / episodes []', () => {
+  const season = {
+    sections: [
+      { id: 'a', title: 'A', episodes: [{ bvid: 'BV1', cid: 1, aid: 10, title: 'ep1', duration: 100, id: 'p1' }] },
+      { id: 'b', title: 'B', episodes: [{ bvid: 'BV2', cid: 2, aid: 20, title: 'ep2', duration: 200, id: 'p2' }] },
+    ],
+  };
+  const model = utils.buildSeasonModel(season, 'BV-不存在');
+  assert.strictEqual(model.sectionIndex, -1);
+  assert.deepStrictEqual(model.episodes, []);
+  assert.strictEqual(model.sections.length, 2);
+});
+
+test('buildSeasonModel 丢弃 bvid 为空的 episode', () => {
+  const season = {
+    id: 7,
+    title: '合集',
+    sections: [
+      {
+        id: 'x',
+        title: '子合集',
+        episodes: [
+          { bvid: 'BV1', cid: 1, aid: 10, title: 'keep', duration: 100, id: 'p1' },
+          { cid: 2, aid: 20, title: 'drop-me', duration: 200, id: 'p2' }, // bvid 缺失
+          { bvid: '', cid: 3, aid: 30, title: 'drop-me-too', duration: 300, id: 'p3' }, // bvid 空串
+          { bvid: null, cid: 4, aid: 40, title: 'drop-me-three', duration: 400, id: 'p4' }, // bvid null
+        ],
+      },
+    ],
+  };
+  const model = utils.buildSeasonModel(season, 'BV1');
+  assert.strictEqual(model.sectionIndex, 0);
+  // 丢弃后 section 内 index 重新从 0 计
+  assert.deepStrictEqual(model.episodes, [{ index: 0, bvid: 'BV1', cid: 1, aid: 10, title: 'keep', duration: 100, id: 'p1' }]);
+  assert.strictEqual(model.sections[0].episodes.length, 1);
+});
+
+test('buildSeasonModel 无效输入返回 null', () => {
+  assert.strictEqual(utils.buildSeasonModel(null, 'BV1'), null);
+  assert.strictEqual(utils.buildSeasonModel(undefined, 'BV1'), null);
+  assert.strictEqual(utils.buildSeasonModel({}, 'BV1'), null);
+  assert.strictEqual(utils.buildSeasonModel({ sections: [] }, 'BV1'), null);
+  assert.strictEqual(utils.buildSeasonModel({ sections: null }, 'BV1'), null);
+  assert.strictEqual(utils.buildSeasonModel({ sections: 'not-array' }, 'BV1'), null);
+});
+
+test('buildSeasonModel currentBvid 空串 → sectionIndex -1', () => {
+  const season = {
+    sections: [
+      { id: 'a', title: 'A', episodes: [{ bvid: 'BV1', cid: 1, aid: 10, title: 'ep1', duration: 100, id: 'p1' }] },
+    ],
+  };
+  const model = utils.buildSeasonModel(season, '');
+  assert.strictEqual(model.sectionIndex, -1);
+  assert.deepStrictEqual(model.episodes, []);
+  // 子合集结构仍正常归一化
+  assert.strictEqual(model.sections[0].index, 0);
+});
+
+test('buildSectionProgressKey id 优先', () => {
+  assert.strictEqual(utils.buildSectionProgressKey(42, { id: 'abc', title: '标题', index: 3 }), 'season_42_sabc');
+  // seasonId 为数字 0
+  assert.strictEqual(utils.buildSectionProgressKey(0, { id: 'abc', title: '标题', index: 0 }), 'season_0_sabc');
+});
+
+test('buildSectionProgressKey id 缺失用 title', () => {
+  assert.strictEqual(utils.buildSectionProgressKey(42, { id: '', title: '第二章', index: 1 }), 'season_42_s第二章');
+  assert.strictEqual(utils.buildSectionProgressKey(42, { id: null, title: '第二章', index: 1 }), 'season_42_s第二章');
+});
+
+test('buildSectionProgressKey id 与 title 均缺失用 i<index>', () => {
+  assert.strictEqual(utils.buildSectionProgressKey(42, { id: '', title: '', index: 2 }), 'season_42_si2');
+});
+
+test('buildSectionProgressKey section 为空返回 _s?', () => {
+  assert.strictEqual(utils.buildSectionProgressKey(42, null), 'season_42_s?');
+  assert.strictEqual(utils.buildSectionProgressKey(42, undefined), 'season_42_s?');
+  assert.strictEqual(utils.buildSectionProgressKey(42, 0), 'season_42_s?');
 });
 
 

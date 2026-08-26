@@ -787,7 +787,14 @@
     // Important #2：已有预取进行中（playurl 请求或流 XHR 在途）时忽略新请求。
     // 不再因"目标 cid 不同"而中止旧预取 —— 中止只由 __cinema_prefetch_cancel__ 显式触发，
     // 否则悬停按需预取会误杀正在进行的自动下一P预取，导致后续切换无字节可用。
-    if (prefetchBusy || livePrefetchXhrs.length > 0) return;
+    if (prefetchBusy || livePrefetchXhrs.length > 0) {
+      // B5：已有预取进行中时静默 return 会让 content 侧 preloading 卡 30 秒（收不到 done 事件）。
+      // 改为 busy 应答：content 侧据此释放槽位、不计失败，并在非忙碌时重试。
+      window.dispatchEvent(new CustomEvent('__cinema_prefetch_done__', {
+        detail: JSON.stringify({ ok: false, reason: 'busy', cid: cid })
+      }));
+      return;
+    }
     prefetchBusy = true;
     var token = prefetchToken;
     fetch('https://api.bilibili.com/x/player/wbi/playurl?bvid=' + encodeURIComponent(bvid) +
@@ -956,7 +963,8 @@
     abortPrefetchXhrs();
   });
 
-  /** 接收 content.js 下发的配置（fastSwitch 开关、当前播放 cid、p2pBlock 开关） */
+  /** 接收 content.js 下发的配置（fastSwitch 开关、当前播放 cid、切P窗口临时 p2pBlock 开关）。
+   * 常驻 p2pBlock 键已删除，p2pBlock 通道现仅供切P关键窗口临时屏蔽使用（applyTempP2PBlock 自收自发） */
   window.addEventListener('__cinema_config__', function (e) {
     var d = parseDetail(e);
     if (typeof d.fastSwitch === 'boolean') bridgeConfig.fastSwitch = d.fastSwitch;
@@ -964,15 +972,4 @@
     if (d.p2pBlock === true) applyP2PBlock();
     if (d.p2pBlock === false && p2pBlocked) restoreRTC();
   });
-
-  // P2P 屏蔽：启动时从 storage 读取设置（与 content.js 下发双保险，覆盖内容脚本尚未就绪的窗口期）
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-      chrome.storage.sync.get('cinemaSettings', function (r) {
-        try {
-          if (r && r.cinemaSettings && r.cinemaSettings.p2pBlock === true) applyP2PBlock();
-        } catch (e) { /* ignore */ }
-      });
-    }
-  } catch (e) { /* ignore */ }
 })();

@@ -5,6 +5,7 @@
  *   - Node 测试环境：module.exports 导出，供 tests/unit.test.js 单测
  * 分段预取相关新增：parseSidx（解析 MP4 sidx box）、buildSegmentPlan（生成逐段预取计划）、
  * parseRangeHeader（解析 HTTP Range 头）、rangeCovered（区间覆盖判断）
+ * 合集子合集模型新增：buildSeasonModel（每个子合集=一部电影的归一化）、buildSectionProgressKey（子合集进度键）
  */
 (function (root, factory) {
   const api = factory();
@@ -221,6 +222,68 @@
     return { start: parseInt(m[1], 10), end: parseInt(m[2], 10) };
   }
 
+  /** 合集子合集模型：「每个 B站合集子合集(section) = 一部电影」的基础归一化。
+   * season 原始结构（ugc_season）：
+   *   { id, title, sections: [{ id?, title?, episodes: [{ bvid, cid, aid, title, duration, page?: { duration }, id }] }] }
+   * 归一化结果与 cinema-player.js 的扁平映射字段一致，仅 index 改为 section 内 0 起。
+   * currentBvid 为当前播放的 bvid；sectionIndex 指向首个包含它的子合集，未找到/为空为 -1。
+   * 垃圾输入（season 为假值、sections 非非空数组）返回 null，永不抛错。
+   */
+  function buildSeasonModel(season, currentBvid) {
+    if (!season || !Array.isArray(season.sections) || season.sections.length === 0) return null;
+    var sections = [];
+    var sectionIndex = -1;
+    var si;
+    for (si = 0; si < season.sections.length; si++) {
+      var sec = season.sections[si] || {};
+      var eps = Array.isArray(sec.episodes) ? sec.episodes : [];
+      var episodes = [];
+      var ei;
+      for (ei = 0; ei < eps.length; ei++) {
+        var ep = eps[ei];
+        if (!ep || !ep.bvid) continue; // 丢弃 bvid 缺失的条目
+        episodes.push({
+          index: episodes.length, // section 内 0 起
+          bvid: ep.bvid || '',
+          cid: ep.cid || 0,
+          aid: ep.aid || 0,
+          title: ep.title || '',
+          duration: ep.duration || (ep.page && ep.page.duration) || 0,
+          id: ep.id || 0
+        });
+      }
+      sections.push({
+        id: sec.id != null ? sec.id : '',
+        title: sec.title || '',
+        index: si,
+        episodes: episodes
+      });
+      if (currentBvid && sectionIndex === -1) {
+        for (ei = 0; ei < episodes.length; ei++) {
+          if (episodes[ei].bvid === currentBvid) {
+            sectionIndex = si;
+            break;
+          }
+        }
+      }
+    }
+    return {
+      id: season.id || 0,
+      title: season.title || '',
+      sections: sections,
+      sectionIndex: sectionIndex,
+      episodes: sectionIndex === -1 ? [] : sections[sectionIndex].episodes
+    };
+  }
+
+  /** 子合集进度存储键：'season_<seasonId>_s<id|title|i<index>>'。
+   * section 为 buildSeasonModel 归一化后的子合集 { id, title, index }；
+   * section 为假值时返回 'season_<seasonId>_s?'。 */
+  function buildSectionProgressKey(seasonId, section) {
+    if (!section) return 'season_' + String(seasonId) + '_s?';
+    return 'season_' + String(seasonId) + '_s' + (section.id || section.title || ('i' + section.index));
+  }
+
   /** 生成 DASH 逐段预取计划。
    * segmentBase: { initialization, indexRange }（Range 字符串 'a-b'，解析失败返回 null）；
    * opts: { targetSeconds=25, maxBytes=8MB }。
@@ -268,37 +331,6 @@
     return false;
   }
 
-  /**
-   * 章节样式进度条渐变：按分P区间生成 90deg 线性渐变（分P分段着色）。
-   * 相邻分P在 B站蓝基准（hsl(197,100%,42%)）附近交替：色相 187°↔207°、亮度 36%↔48%，
-   * 分P边界保留约 2px 深色硬分隔（rgba(0,0,0,.45)）。
-   * 无数据、单分P或异常输入时返回空串。
-   */
-  function buildChapterGradient(pages, cumulative, totalDuration) {
-    if (typeof totalDuration !== 'number' || !isFinite(totalDuration) || totalDuration <= 0) return '';
-    if (!Array.isArray(cumulative) || !Array.isArray(pages) || pages.length <= 1) return '';
-    if (cumulative.length < pages.length + 1) return '';
-
-    var stops = [];
-    for (var i = 0; i < pages.length; i++) {
-      var color = 'hsl(' + (i % 2 === 0 ? 187 : 207) + ', 100%, ' + (i % 2 === 0 ? 48 : 36) + '%)';
-      var cStart = Number(cumulative[i]);
-      var cEnd = Number(cumulative[i + 1]);
-      if (!isFinite(cStart) || cStart < 0) cStart = 0;
-      if (!isFinite(cEnd) || cEnd < cStart) cEnd = cStart;
-      var start = Math.max(0, Math.min(100, (cStart / totalDuration) * 100));
-      var end = Math.max(0, Math.min(100, (cEnd / totalDuration) * 100));
-
-      if (i > 0) {
-        stops.push('rgba(0, 0, 0, 0.45) ' + start.toFixed(3) + '%');
-        stops.push('rgba(0, 0, 0, 0.45) calc(' + start.toFixed(3) + '% + 2px)');
-        stops.push(color + ' calc(' + start.toFixed(3) + '% + 2px)');
-      }
-      stops.push(color + ' ' + end.toFixed(3) + '%');
-    }
-    return 'linear-gradient(90deg, ' + stops.join(', ') + ')';
-  }
-
   return {
     formatTime,
     formatRelativeTime,
@@ -313,8 +345,9 @@
     buildSegmentPlan,
     parseRangeHeader,
     rangeCovered,
-    buildChapterGradient,
+    buildSeasonModel,
+    buildSectionProgressKey,
   };
-  /* 底部说明：新增 parseSidx / buildSegmentPlan / parseRangeHeader / rangeCovered / buildChapterGradient
-   * 纯函数，与既有函数一致：无副作用、无 DOM/chrome 依赖，UMD 双端导出 */
+  /* 底部说明：新增 parseSidx / buildSegmentPlan / parseRangeHeader / rangeCovered /
+   * buildSeasonModel / buildSectionProgressKey 均为纯函数，与既有函数一致：无副作用、无 DOM/chrome 依赖，UMD 双端导出 */
 });

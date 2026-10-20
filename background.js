@@ -9,7 +9,10 @@
  *   toggleBookmark  按 bvid 切换收藏
  */
 
-const BOOKMARK_LIMIT = 50; // 与 cinema-core.js 的收藏容量保持一致
+// 复用纯函数库（sanitizeBookmarkList / toggleBookmarkEntry 等）：本 manifest 的 background
+// 未声明 type:module，属经典 Service Worker，可用 importScripts；该库为 UMD 且无
+// DOM/chrome 依赖，会把导出挂到 globalThis。收藏容量只在库内定义一份。
+importScripts('cinema-utils.js');
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
@@ -26,7 +29,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'getPopupData') {
-    getPopupData().then(sendResponse);
+    // 必须带 catch：Promise 被拒时若不回送响应，消息通道会一直挂着导致 popup 停在加载态
+    getPopupData().then(sendResponse).catch(() => sendResponse(null));
     return true; // 异步响应
   }
 
@@ -119,7 +123,9 @@ function setEnabled(enabled) {
   });
 }
 
-/** 弹窗收藏切换：item: { bvid, title, pic }；按 bvid 去重、最新在前、容量 50 */
+/** 弹窗收藏切换：item: { bvid, title, pic }。
+ *  切换/去重/消毒/容量截断语义与 content 侧共用 cinema-utils.js 的同一实现
+ *  （此前本函数只做长度截断，缺字段清洗与去重，两侧行为已分叉）。 */
 function toggleBookmarkInStorage(item) {
   return new Promise((resolve) => {
     try {
@@ -127,24 +133,10 @@ function toggleBookmarkInStorage(item) {
       if (!bvid) { resolve({ list: [], bookmarked: false }); return; }
       chrome.storage.sync.get('cinemaBookmarks', (res) => {
         try {
-          let list = (res && res.cinemaBookmarks) || [];
-          if (!Array.isArray(list)) list = [];
-          let bookmarked = false;
-          const idx = list.findIndex((b) => b && b.bvid === bvid);
-          if (idx !== -1) {
-            list.splice(idx, 1);
-          } else {
-            list.unshift({
-              bvid: bvid,
-              title: (item.title || ''),
-              pic: (item.pic || ''),
-              ts: Date.now(),
-            });
-            bookmarked = true;
-          }
-          while (list.length > BOOKMARK_LIMIT) list.pop();
-          chrome.storage.sync.set({ cinemaBookmarks: list }, () => {
-            resolve({ list: list, bookmarked: bookmarked });
+          const list = (res && res.cinemaBookmarks) || [];
+          const out = toggleBookmarkEntry(list, item);
+          chrome.storage.sync.set({ cinemaBookmarks: out.list }, () => {
+            resolve({ list: out.list, bookmarked: out.bookmarked });
           });
         } catch (e) { resolve({ list: [], bookmarked: false }); }
       });

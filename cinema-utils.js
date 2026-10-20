@@ -133,6 +133,102 @@
     return null;
   }
 
+  /** overallToPartOffset 的逆运算：分P内时间 → 电影内绝对位置。
+   * 纯函数：cumulative 前缀和数组，part 为 1-based 分P号，time 为该 P 内秒数。
+   * 观影记录的 overallTime 字段由此计算（time 是 P 内时间、totalDuration 是电影总长，
+   * 口径不同不可直接相除，必须换算后才能得出总进度百分比）。 */
+  function overallFromPart(cumulative, part, time) {
+    const idx = (part || 1) - 1;
+    const start = (cumulative && cumulative[idx]) || 0;
+    return start + (time || 0);
+  }
+
+  /**
+   * 拖拽 pointerup 之后抑制紧随 click 事件的窗口判定（纯函数：不读时钟、不碰 DOM）。
+   * 用时间戳而非布尔量：若 click 因故没触发，窗口会自然过期，不会永久吞掉用户后续的正常点击。
+   * @param {number} stamp  pointerup 记录的时间戳；0/空表示无待抑制的 click
+   * @param {number} now    本次 click 的时间戳
+   * @param {number} [windowMs] 窗口长度（毫秒），默认 500
+   * @returns {boolean} true = 落在窗口内，本次 click 应跳过并将 stamp 清零
+   */
+  function isClickSuppressed(stamp, now, windowMs) {
+    if (!stamp) return false;
+    const limit = typeof windowMs === 'number' ? windowMs : 500;
+    return (now - stamp) < limit;
+  }
+
+  /** 秒数 → 中文可读时长（用于"累计观影"这类统计值，刻意不到秒，避免假精确）。
+   * 非法/<=0 返回空串，由调用方决定隐藏；<60s 归为"1 分钟内"。纯函数。 */
+  function formatDurationCN(seconds) {
+    const s = Math.floor(Number(seconds));
+    if (!isFinite(s) || s <= 0) return '';
+    if (s < 60) return '1 分钟内';
+    if (s < 3600) return `${Math.floor(s / 60)} 分钟`;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
+  }
+
+  /** 收藏列表容量上限。唯一定义处——content 与 background 过去各存一份且已行为分叉。 */
+  const BOOKMARK_CAP = 50;
+
+  /** 收藏列表消毒（纯函数）：仅保留含 bvid 的对象条目、按 bvid 去重（保留先出现者）、
+   *  按 cap 截断尾部（约定最新在前，超限丢最旧）。 */
+  function sanitizeBookmarkList(list, cap) {
+    const limit = typeof cap === 'number' ? cap : BOOKMARK_CAP;
+    const src = Array.isArray(list) ? list : [];
+    const seen = Object.create(null);
+    const clean = [];
+    for (const it of src) {
+      if (!it || typeof it !== 'object' || !it.bvid) continue;
+      if (seen[it.bvid]) continue;
+      seen[it.bvid] = true;
+      clean.push(it);
+    }
+    while (clean.length > limit) clean.pop();
+    return clean;
+  }
+
+  /** 切换收藏（纯函数，不落盘）：先消毒；命中 bvid 则移除，否则把 {bvid,title,pic,ts}
+   *  插到最前。缺 bvid 时不切换、只返回消毒后的列表。
+   *  part（1-based 分P号）与 overallTime（电影内秒数）只在调用方真实给了数字时才写入：
+   *  旧书签没有这两个字段，打开时走原来的片头，不编一个假进度。
+   *  @returns {{ list: Array, bookmarked: boolean }} 切换后的真实状态 */
+  function toggleBookmarkEntry(list, meta, cap, now) {
+    const clean = sanitizeBookmarkList(list, cap);
+    const bvid = meta && meta.bvid;
+    if (!bvid) return { list: clean, bookmarked: false };
+    const idx = clean.findIndex((b) => b && b.bvid === bvid);
+    if (idx !== -1) {
+      clean.splice(idx, 1);
+      return { list: clean, bookmarked: false };
+    }
+    const entry = {
+      bvid: bvid,
+      title: (meta.title || ''),
+      pic: (meta.pic || ''),
+      ts: typeof now === 'number' ? now : Date.now(),
+    };
+    const part = Number(meta.part);
+    const overall = Number(meta.overallTime);
+    if (isFinite(part) && part >= 1) entry.part = Math.floor(part);
+    if (isFinite(overall) && overall >= 0) entry.overallTime = overall;
+    clean.unshift(entry);
+    return { list: sanitizeBookmarkList(clean, cap), bookmarked: true };
+  }
+
+  /** 收藏 → 打开地址。有真实的 part（多P，且不是第 1 集）才带 ?p=；
+   *  合集、旧书签、缺字段都不带，打开片头，不编分P号。 */
+  function bookmarkUrl(item) {
+    const bvid = item && item.bvid;
+    if (!bvid) return '';
+    let url = 'https://www.bilibili.com/video/' + bvid;
+    if (item.mode !== 'season' && typeof item.part === 'number' && item.part > 1) {
+      url += '?p=' + item.part;
+    }
+    return url;
+  }
+
   /** 新功能：MP4 sidx 解析与 DASH 分段预取（均无副作用、无 DOM/chrome 依赖） */
 
   /** 解析 HTTP Range 请求头：'bytes=0-1021' → { start: 0, end: 1021 }；
@@ -331,6 +427,21 @@
     return false;
   }
 
+  /** 分P展示标签（纯函数）：season→「第n集 · 名」，pages→「P页 · 名」；无 part 返回空串。
+   * 进度条 tooltip 与系统媒体卡片共用同一口径（约束 19/59），勿在别处复制该格式。
+   * @param {string} mode  'season' | 'pages'
+   * @param {number} index 0-based 分P下标（season 用其 +1 作集号）
+   * @param {{page?: number, part?: string}} part 该分P对象
+   * @returns {string}
+   */
+  function partDisplayLabel(mode, index, part) {
+    if (!part) return '';
+    const name = (part.part || '').trim();
+    return mode === 'season'
+      ? `第${index + 1}集${name ? ' · ' + name : ''}`
+      : `P${part.page}${name ? ' · ' + name : ''}`;
+  }
+
   return {
     formatTime,
     formatRelativeTime,
@@ -338,6 +449,7 @@
     qualityTextToQn,
     buildCumulative,
     overallToPartOffset,
+    overallFromPart,
     isAudioStreamFilename,
     extractStreamCode,
     matchStreamUrls,
@@ -347,7 +459,17 @@
     rangeCovered,
     buildSeasonModel,
     buildSectionProgressKey,
+    isClickSuppressed,
+    formatDurationCN,
+    sanitizeBookmarkList,
+    toggleBookmarkEntry,
+    bookmarkUrl,
+    partDisplayLabel,
   };
   /* 底部说明：新增 parseSidx / buildSegmentPlan / parseRangeHeader / rangeCovered /
-   * buildSeasonModel / buildSectionProgressKey 均为纯函数，与既有函数一致：无副作用、无 DOM/chrome 依赖，UMD 双端导出 */
+   * buildSeasonModel / buildSectionProgressKey / overallFromPart / isClickSuppressed /
+   * formatDurationCN / sanitizeBookmarkList / toggleBookmarkEntry / bookmarkUrl / partDisplayLabel
+   * 均为纯函数，与既有函数一致：无副作用、无 DOM/chrome 依赖，UMD 双端导出。
+   * 注：BOOKMARK_CAP 刻意不导出（避免与各文件顶层同名 const 在全局词法作用域撞名），
+   * 收藏容量通过函数默认参数生效，需要覆盖时显式传 cap。 */
 });

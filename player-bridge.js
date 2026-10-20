@@ -112,7 +112,8 @@
   // B1/Important #2：在途预取跟踪 —— 中止只由 __cinema_prefetch_cancel__ 显式触发
   var livePrefetchXhrs = [];  // 进行中的预取 XHR
   var prefetchToken = 0;      // 预取代际计数：取消后自增，异步回调据此静默停止旧链
-  var prefetchBusy = false;   // doPrefetch 进行中（覆盖 playurl 请求尚未起流的窗口期）
+  var prefetchBusy = false;   // 本轮预取尚未结束：playurl 在途，或流 XHR 还没全部落地
+  var prefetchCid = 0;        // 本轮正在预取的 cid；同 cid 的 busy 应答不得让 content 清槽
 
   // 捕获 cinema-utils.js 导出的纯函数引用入闭包（utils 先于本文件在 MAIN world 注入，
   // 防止页面脚本后续覆盖全局名导致行为漂移）
@@ -253,6 +254,9 @@
       settled = true;
       var idx = livePrefetchXhrs.indexOf(req);
       if (idx !== -1) livePrefetchXhrs.splice(idx, 1);
+      // 这一轮的流都落地了（成功或失败都算落地）：下一轮预取可以开始。
+      // 不能在 XHR 刚发出时就放行，否则下一次 timeupdate 会把同一集再拉一遍。
+      if (livePrefetchXhrs.length === 0) prefetchBusy = false;
       cb(ok, buf, total);
     };
     req.onload = function () {
@@ -291,9 +295,12 @@
     }
   }
 
-  /** 中止全部进行中的预取 XHR，并使旧预取链静默停止（B1） */
+  /** 中止全部进行中的预取 XHR，并使旧预取链静默停止（B1）。
+   * 同时放开忙碌：abort 的 settle 会因代际不符提前 return，不会自己清 prefetchBusy。 */
   function abortPrefetchXhrs() {
     prefetchToken++;
+    prefetchBusy = false;
+    prefetchCid = 0;
     for (var i = 0; i < livePrefetchXhrs.length; i++) {
       try { livePrefetchXhrs[i].abort(); } catch (e) { /* ignore */ }
     }
@@ -324,8 +331,10 @@
     }
   }
 
-  /** 预取成功：写 byteStore + prefetchTable（URL 重写兜底仍需要）+ 回传 done 事件 */
-  function writeByteStore(name, url, expires, chunks, totalSize, kind, cid) {
+  /** 预取成功：写 byteStore + prefetchTable（URL 重写兜底仍需要）+ 回传 done 事件。
+   * primary 只标主视频变体：content 侧据此才把该 cid 当成「已热」。
+   * 音频和兜底视频变体同样落盘（切 P 时仍可命中），但它们先到不代表画面已经在。 */
+  function writeByteStore(name, url, expires, chunks, totalSize, kind, cid, primary) {
     pruneByteStore();
     var key = storeKey(cid, name); // Important #1：按 cid+basename 键写入，避免跨分P同名 m4s 串档
     byteStore[key] = { chunks: chunks, totalSize: totalSize, url: url, expires: expires };
@@ -335,17 +344,18 @@
       if (chunks[i] && chunks[i].buffer) bytes += chunks[i].buffer.byteLength || 0;
     }
     window.dispatchEvent(new CustomEvent('__cinema_prefetch_done__', {
-      detail: JSON.stringify({ ok: true, name: name, cid: cid, kind: kind, bytes: bytes })
+      detail: JSON.stringify({ ok: true, name: name, cid: cid, kind: kind, bytes: bytes, primary: !!primary })
     }));
   }
 
-  /** 逐流预取：一个流变体 + 排序后的候选 URL 列表；任一候选全部失败则回传 fail */
-  function prefetchStream(item, kind, budget, urls, cid, expires, token) {
+  /** 逐流预取：一个流变体 + 排序后的候选 URL 列表；任一候选全部失败则回传 fail。
+   * primary：本轮的主视频变体。只有它落盘才回传 primary:true。 */
+  function prefetchStream(item, kind, budget, urls, cid, expires, token, primary) {
     var segBase = item.segmentBase || item.SegmentBase;
-    tryPrefetchVariant(item, kind, budget, urls, 0, segBase, cid, expires, token);
+    tryPrefetchVariant(item, kind, budget, urls, 0, segBase, cid, expires, token, primary);
   }
 
-  function tryPrefetchVariant(item, kind, budget, urls, idx, segBase, cid, expires, token) {
+  function tryPrefetchVariant(item, kind, budget, urls, idx, segBase, cid, expires, token, primary) {
     if (prefetchToken !== token) return; // B1：预取已被取消/替换，静默停止旧链
     if (idx >= urls.length) {
       window.dispatchEvent(new CustomEvent('__cinema_prefetch_done__', {
@@ -365,7 +375,7 @@
           return;
         }
         var chunkEnd = Math.min(budget.maxBytes - 1, buf.byteLength - 1);
-        writeByteStore(name, url, expires, [{ start: 0, end: chunkEnd, buffer: buf }], totalSize, kind, cid);
+        writeByteStore(name, url, expires, [{ start: 0, end: chunkEnd, buffer: buf }], totalSize, kind, cid, primary);
       });
       return;
     }
@@ -382,7 +392,7 @@
 
     // 畸形 segmentBase → 退化为无 segBase 兜底
     if (initEnd < 0 || headEnd < 0) {
-      tryPrefetchVariant(item, kind, budget, urls, idx, null, cid, expires, token);
+      tryPrefetchVariant(item, kind, budget, urls, idx, null, cid, expires, token, primary);
       return;
     }
 
@@ -424,7 +434,7 @@
               return;
             }
             writeByteStore(name, url, expires,
-              [headChunk, { start: firstStart, end: lastEnd, buffer: mediaBuf }], totalSize, kind, cid);
+              [headChunk, { start: firstStart, end: lastEnd, buffer: mediaBuf }], totalSize, kind, cid, primary);
           });
         } else {
           // media 为空：兜底请求 headEnd+1 起 maxBytes 字节
@@ -437,7 +447,7 @@
               return;
             }
             writeByteStore(name, url, expires,
-              [headChunk, { start: fbStart, end: fbEnd, buffer: fbBuf }], totalSize, kind, cid);
+              [headChunk, { start: fbStart, end: fbEnd, buffer: fbBuf }], totalSize, kind, cid, primary);
           });
         }
       };
@@ -489,6 +499,8 @@
       'accept-ranges': 'bytes'
     };
 
+    // 标记本实例已安装合成影子属性：下次 open() 须清除，防遮蔽真实响应
+    self._cinemaSynthetic = true;
     Object.defineProperty(self, 'status', { configurable: true, get: function () { return 206; } });
     Object.defineProperty(self, 'statusText', { configurable: true, get: function () { return 'Partial Content'; } });
     Object.defineProperty(self, 'response', { configurable: true, get: function () { return respVal; } });
@@ -547,21 +559,27 @@
     var origSetRequestHeader = xhr.setRequestHeader;
 
     xhr.open = function (method, url) {
-      // 清除上一次合成响应留下的影子属性（XHR 可能被复用）
+      // 影子属性只在合成响应路径安装（serveStoredBytes / playurl 本地合成），
+      // 装过才需在 XHR 复用时清除（否则旧合成响应会遮蔽本次真实结果）。
+      // 未装过时跳过这 8 次 delete：删除属性会使宿主 XHR 对象退化为 dictionary 模式，
+      // 而本包装器套在全站请求上，这是它对埋点/心跳/推荐流量的主要开销来源。
+      if (this._cinemaSynthetic) {
+        this._cinemaSynthetic = false;
+        try {
+          delete this.responseText;
+          delete this.response;
+          delete this.status;
+          delete this.statusText;
+          delete this.readyState;
+          delete this.responseURL;
+          delete this.getAllResponseHeaders;
+          delete this.getResponseHeader;
+        } catch (e) { /* ignore */ }
+      }
       this._cinemaOrigUrl = url;
       this._cinemaByteCandidate = undefined;
       this._cinemaReqRange = undefined;
       this._cinemaPlayurlCache = undefined;
-      try {
-        delete this.responseText;
-        delete this.response;
-        delete this.status;
-        delete this.statusText;
-        delete this.readyState;
-        delete this.responseURL;
-        delete this.getAllResponseHeaders;
-        delete this.getResponseHeader;
-      } catch (e) { /* ignore */ }
 
       if (method === 'GET' && typeof url === 'string') {
         // 流请求：记录文件名；按 cid+basename 键查 byteStore，命中且未过期则标记字节合成候选
@@ -609,7 +627,12 @@
     };
 
     xhr.setRequestHeader = function (name, value) {
-      if (String(name).toLowerCase() === 'range') this._cinemaReqRange = value;
+      // Range 值仅在字节合成分支被消费（send 内 _cinemaByteCandidate 为真时才读），
+      // 而该标记在 open() 阶段已确定。非候选请求直接放行，省掉全站每个请求头
+      // 一次的 String() 包装 + toLowerCase() 分配。
+      if (this._cinemaByteCandidate && String(name).toLowerCase() === 'range') {
+        this._cinemaReqRange = value;
+      }
       return origSetRequestHeader.call(this, name, value);
     };
 
@@ -621,6 +644,9 @@
         var text = JSON.stringify(cached);
         setTimeout(function () {
           if (self._cinemaAborted) return;
+          // 标记在 try 之外置位：即使 defineProperty 序列中途抛错留下部分影子属性，
+          // 下次 open() 也会清理干净
+          self._cinemaSynthetic = true;
           try {
             Object.defineProperty(self, 'responseText', { configurable: true, get: function () { return text; } });
             Object.defineProperty(self, 'response', {
@@ -790,12 +816,15 @@
     if (prefetchBusy || livePrefetchXhrs.length > 0) {
       // B5：已有预取进行中时静默 return 会让 content 侧 preloading 卡 30 秒（收不到 done 事件）。
       // 改为 busy 应答：content 侧据此释放槽位、不计失败，并在非忙碌时重试。
+      // same：这次打回的就是正在下的那一集。content 侧不得因此清掉 preloadedCid——
+      // 清了的话下一次 timeupdate 会把同一集再拉一遍，和正在看的片子抢带宽。
       window.dispatchEvent(new CustomEvent('__cinema_prefetch_done__', {
-        detail: JSON.stringify({ ok: false, reason: 'busy', cid: cid })
+        detail: JSON.stringify({ ok: false, reason: 'busy', cid: cid, same: cid === prefetchCid })
       }));
       return;
     }
     prefetchBusy = true;
+    prefetchCid = cid;
     var token = prefetchToken;
     fetch('https://api.bilibili.com/x/player/wbi/playurl?bvid=' + encodeURIComponent(bvid) +
       '&cid=' + cid + '&qn=' + (qn || 80) + '&fnval=4048&fourk=1', { credentials: 'include' })
@@ -895,13 +924,19 @@
           var vBudget = sv === 0
             ? { targetSeconds: 25, maxBytes: 8 * 1048576 }
             : { targetSeconds: 10, maxBytes: 1.5 * 1048576 };
-          prefetchStream(videoStreams[sv].item, 'video', vBudget, videoStreams[sv].urls, cid, expires, token);
+          // 只有排序后的第一个视频变体是主变体：它落盘才算「这一集已经热了」
+          prefetchStream(videoStreams[sv].item, 'video', vBudget, videoStreams[sv].urls, cid, expires, token, sv === 0);
         }
         for (var sa = 0; sa < audioStreams.length; sa++) {
           prefetchStream(audioStreams[sa].item, 'audio',
-            { targetSeconds: 25, maxBytes: 1 * 1048576 }, audioStreams[sa].urls, cid, expires, token);
+            { targetSeconds: 25, maxBytes: 1 * 1048576 }, audioStreams[sa].urls, cid, expires, token, false);
         }
-        prefetchBusy = false; // playurl 解析完成、各流已启动，剩余在途由 livePrefetchXhrs 跟踪
+        // 不在发出之后按「列表还空」放行：流 XHR 是同步登记的，最后一个落地时
+        // 由 xhrRange 的 settle 放开。提前放开的话，下一次 timeupdate 会在主视频
+        // 变体发出之前再开一轮，并把正在下的这一集清掉。
+        // 一个流都没有（playurl 给了 dash 但没有任何可下的地址）则没有在途可等，必须放行，
+        // 否则 prefetchBusy 会一直为真，这一集再也不会被预取。
+        if (videoStreams.length === 0 && audioStreams.length === 0) prefetchBusy = false;
       })
       .catch(function () {
         prefetchBusy = false;

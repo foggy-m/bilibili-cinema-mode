@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-green.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/tests-34%20passed-brightgreen.svg)](tests/unit.test.js)
+[![Tests](https://img.shields.io/badge/tests-47%20passed-brightgreen.svg)](tests/unit.test.js)
 
 ---
 
@@ -13,12 +13,16 @@
 - 🎞️ **全剧统合进度条**：将所有分P或合集视频的总时长合并为统一时间线，支持分P分界标记、跨P点击/拖拽/键盘跳转。**平时光学上贴近 B 站原生观感**——分P标记与电影总时长只在悬停/拖拽到分P边界时才浮现。
 - ⚡ **字节级无缝预加载（秒开切P）**：后台自动预取下一分P视频流，在内存中进行字节切片合成（206 响应），彻底告别切集黑屏等待。
 - 🧊 **冻结帧过渡与音量淡入淡出**：切集瞬间冻结前一分P末帧至 Canvas 遮罩，新分P首帧渲染后平滑淡出，伴随音量渐变过渡。
-- 🎭 **沉浸式影院界面**：自动隐藏播放器内的干扰元素；支持关灯模式（L 键切换）。
+- 🎭 **沉浸式影院界面**：影院模式开启时自动隐藏播放器内的水印与干扰元素。
 - 🎬 **播完无扩展界面**：影片播完后不显示任何扩展结束界面（仅按需压制 B 站原生自动连播，防止跳转推荐视频）。
 - 💬 **进度条悬停提示**：鼠标悬停进度条时显示时间点与所属分P标题（单P内显示P内时间，近边界/跨P显示电影总时间）。
 - ⏱️ **记忆播放进度**：跨会话记忆观影进度。
+- ⏳ **累计观影时长**：弹窗「正在观影」卡显示本片跨会话累计实际观看时长（不足 1 分钟归为「1 分钟内」，无数据则不显示）。
 - ☁️ **跨标签页与跨设备同步**：播放设置与观影记录通过 `chrome.storage.sync` 自动跨设备多端同步。
-- 🪟 **多功能 Popup 弹窗**：支持快速启停影院模式、继续播放当前影片、查看最近观影历史与视频收藏夹，以及「打开播放器设置」入口。
+- 🪟 **多功能 Popup 弹窗**：支持快速启停影院模式、继续播放当前影片（自动带上分P）、查看最近观影历史与视频收藏夹，以及「打开播放器设置」入口。
+- 🖥️ **显示模式跨会话记忆**（v1.17）：切到宽屏或网页全屏后再次打开视频自动恢复（原生全屏需用户手势，不记）。
+- 🎬 **片尾谢幕驻留**（v1.17）：多P电影最后一集播完时画面停在末帧，点击或按键一下即进入B站原生推荐，不打扰落幕时刻。
+- 🎵 **系统媒体卡片**（v1.18）：多P电影显示当前分P标题与电影名，支持通过系统或浏览器媒体控件切换上一P / 下一P；保留 B 站原生播放、暂停和快进控制。
 
 ---
 
@@ -26,9 +30,9 @@
 
 ### 方式：以开发者模式加载
 
-1. 下载或 Clone 本仓库代码到本地：
+1. 从 [最新 Release](https://github.com/foggy-m/bilibili-cinema-mode/releases/latest) 下载 `bilibili-cinema-mode-v*.zip` 安装包并解压，或 Clone 本仓库代码到本地：
    ```bash
-   git clone https://github.com/<你的用户名>/bilibili-cinema-mode.git
+   git clone https://github.com/foggy-m/bilibili-cinema-mode.git
    ```
 2. 打开 Google Chrome 或 Edge 浏览器，访问扩展管理页面：
    - Chrome：地址栏输入 `chrome://extensions/`
@@ -37,6 +41,8 @@
 4. 点击左上角的 **「加载已解压的扩展程序」** (Load unpacked)。
 5. 选择下载或解压后的插件文件夹根目录即可。
 6. 打开任意 B 站多分 P 视频或合集视频页面（如 `https://www.bilibili.com/video/BV...`），插件将自动激活影院模式！
+
+更新已有扩展时，将新版解压到原安装目录，在扩展管理页面点击该扩展的「重新加载」，再刷新 B 站视频页面。
 
 ---
 
@@ -48,7 +54,6 @@
 |---|---|
 | `N` / `P` | 下一 P / 上一 P |
 | `S` | 打开 / 关闭设置面板 |
-| `L` | 切换关灯模式 |
 | `J` / `K` | 后退 / 前进 10 秒 |
 
 进度条快捷键：
@@ -76,7 +81,7 @@
 ├── content.js            # 内容脚本引导与双世界 (CustomEvent) 消息通道
 ├── content.css           # 影院模式样式体系、设计令牌与动效
 ├── popup.html / js / css # 工具栏弹窗（历史记录、收藏夹、打开设置与快捷开关）
-└── tests/unit.test.js    # Node.js 原生测试套件（34 个纯函数与算法单测）
+└── tests/unit.test.js    # Node.js 原生测试套件（47 个纯函数与算法单测）
 ```
 
 ### 双世界通信设计
@@ -88,11 +93,11 @@
 
 ## 🧪 单元测试
 
-本项目包含 34 项核心算法与纯逻辑测试用例（覆盖时间格式化、前缀和时间线映射、sidx 媒体索引解析、206 Range 覆盖判定、合集子合集模型等）：
+本项目包含 47 项核心算法与纯逻辑测试用例（覆盖时间格式化、前缀和与时间线双向换算 `buildCumulative`/`overallToPartOffset`/`overallFromPart`、click 抑制窗口判定 `isClickSuppressed`、sidx 媒体索引解析、206 Range 覆盖判定、合集子合集模型、书签与分P标签格式等）：
 
 ```bash
-npm test
-# 或
+npm run check   # 全部 8 个源文件语法检查 + 单测（提交前推荐）
+npm test        # 仅跑单测
 node --test tests/unit.test.js
 ```
 

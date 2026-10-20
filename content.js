@@ -70,12 +70,9 @@ function onNavigate() {
       if (epIndex !== state.currentIndex && !state.switching && !state.restoringProgress) {
         state.currentIndex = epIndex;
         state.bvid = newBvid;
-        // 同步 cid/aid，避免同一 season 内导航后 state.cid/state.aid 停留在旧剧集
+        // 同步 cid，避免同一 season 内导航后 state.cid 停留在旧剧集
         const ep = state.seasonEpisodes[epIndex];
-        if (ep) {
-          if (ep.cid != null) state.cid = ep.cid;
-          if (ep.aid != null) state.aid = ep.aid;
-        }
+        if (ep && ep.cid != null) state.cid = ep.cid;
         refreshVideoElement();
         updateUnifiedProgress();
         // 手动导航已落地：收起可能残留的切P失败恢复卡
@@ -197,6 +194,9 @@ async function init() {
       } else {
         log('无法获取视频数据，影院模式不启用');
         showStatusBadge('影院模式：无法获取视频数据', 'error');
+        // 仍装导航观察器：否则后续 SPA 跳转到其他视频时无人重新 init，影院模式死到手动刷新为止。
+        // 此时 state.bvid 为空，onNavigate 会把任何真实 bvid 判为新视频 → cleanup + 重新 init
+        setupNavigationObserver();
       }
     };
     setTimeout(retry, 500);
@@ -244,6 +244,8 @@ async function proceed() {
       setTimeout(waitForVideo, 500);
     } else {
       log('未找到视频元素');
+      // 同上：走不到 onVideoFound 就必须在此补装导航观察器，否则后续换视频无法自愈
+      setupNavigationObserver();
     }
   };
   waitForVideo();
@@ -269,10 +271,6 @@ async function onVideoFound() {
   // 监听桥接脚本的预取结果（失败时禁止重试）
   state.prefetchDoneHandler = onPrefetchDone;
   window.addEventListener('__cinema_prefetch_done__', onPrefetchDone);
-
-  // 关灯遮罩跟随播放器位置（窗口缩放/滚动时刷新）
-  window.addEventListener('resize', updateLightsOut);
-  window.addEventListener('scroll', updateLightsOut, true);
 
   // 跨标签页/跨设备进度同步（chrome.storage.onChanged，处理 local 与 sync 两个区域）
   // B3：init 重试/并发可能重复走到这里，先移除旧监听再注册，
@@ -319,11 +317,11 @@ async function onVideoFound() {
     tryEarlyPreloadAfterRestore();
   }
 
-  // 恢复显示模式（从整页刷新后恢复）
-  const savedMode = sessionStorage.getItem('cinemaDisplayMode');
-  if (savedMode && savedMode !== 'normal') {
-    sessionStorage.removeItem('cinemaDisplayMode');
-    log(`从 sessionStorage 恢复显示模式: ${savedMode}`);
+  // 恢复显示模式：从 prefs 读（跨会话记忆）。原生全屏不在 prefs（浏览器需用户手势），
+  // 只探测 wide/web-fullscreen。loadPlayerPrefs 已在 onVideoFound 早于此处完成。
+  const savedMode = (typeof state.prefs === 'object' && state.prefs.displayMode) || 'normal';
+  if (savedMode && savedMode !== 'normal' && savedMode !== 'fullscreen') {
+    log(`按会话记忆恢复显示模式: ${savedMode}`);
     setTimeout(() => restoreDisplayMode(savedMode), 1000);
   }
 
@@ -341,20 +339,15 @@ function cleanup() {
   if (state.observerTop) state.observerTop.disconnect();
   detachVideoListeners();
 
-  // 移除全局监听
-  window.removeEventListener('resize', updateLightsOut);
-  window.removeEventListener('scroll', updateLightsOut, true);
-
   // 还原底栏原生展示与状态类
   document.body.classList.remove(
     'cinema-bottom-progress',
     'cinema-active',
     'cinema-multi-part',
-    'cinema-season-mode',
-    'cinema-lights-out-active'
+    'cinema-season-mode'
   );
   if (state.playerWrap) {
-    state.playerWrap.classList.remove('cinema-lights-out-active', 'cinema-active');
+    state.playerWrap.classList.remove('cinema-active');
   }
   if (typeof onPanelEscape === 'function') {
     document.removeEventListener('keydown', onPanelEscape);
@@ -378,13 +371,13 @@ function cleanup() {
 
   state.initialized = false;
   state.switching = false;
+  state.advanceTarget = null; // 离开本页：在途连播不再占着下一次自动切 P
   state.switchEpoch = (state.switchEpoch || 0) + 1; // 使切换中残留的 waitForVideoChange(Season) 轮询作废
   state.restoringProgress = false;
   state.video = null;
   state.playerWrap = null;
   state.bvid = '';
   state.cid = 0;
-  state.aid = 0;
   state.title = '';
   state.pages = [];
   state.currentIndex = 0;
@@ -393,7 +386,6 @@ function cleanup() {
   state.isMultiPart = false;
   state.mode = 'pages';
   state.seasonId = 0;
-  state.seasonTitle = '';
   state.seasonSections = [];
   state.seasonSectionIndex = -1;
   state.seasonEpisodes = [];
@@ -406,12 +398,15 @@ function cleanup() {
   state.seekDragging = false;
   if (state.p2pTempTimer) { clearTimeout(state.p2pTempTimer); state.p2pTempTimer = null; }
   state.fadeSnapshot = null;
+  if (typeof cancelFadeOut === 'function') cancelFadeOut();
   state.freezeArmed = false;
+  if (typeof disarmFreezeRelease === 'function') disarmFreezeRelease();
   state.prefetchOkCid = null;
   state.preloadFailTs = 0;
   state.preloading = false;
   if (state.prefetchCancelTimer) { clearTimeout(state.prefetchCancelTimer); state.prefetchCancelTimer = null; }
   teardownCinemaShortcuts();
+  teardownMediaSession(); // B1(v1.18)：移除系统媒体卡片的上/下一首处理器，防跨页残留
   if (typeof teardownHoverPrefetch === 'function') teardownHoverPrefetch(); // hover 预取监听（防 SPA 导航后累积）
   if (state.prefetchDoneHandler) {
     window.removeEventListener('__cinema_prefetch_done__', state.prefetchDoneHandler);

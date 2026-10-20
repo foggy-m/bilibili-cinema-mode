@@ -9,20 +9,11 @@
 
 const $ = (sel) => document.querySelector(sel);
 
-/** 基础 HTML 转义（渲染标题等用户数据用） */
-function esc(str) {
-  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  })[c]);
-}
-
-/** 秒 → mm:ss */
-function fmtTime(sec) {
-  sec = Math.max(0, Math.floor(sec || 0));
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+// 转义与时长格式化复用 cinema-utils.js 的同一实现（popup.html 已先于本文件加载）。
+// 顺带修正一处既有缺陷：本地 fmtTime 只会输出 mm:ss，65 分钟的视频会显示成「65:00」；
+// utils.formatTime 对超过 1 小时的时长输出 h:mm:ss。
+const esc = escapeHtml;
+const fmtTime = formatTime;
 
 /** 从 URL 提取 bvid（无则返回空串） */
 function extractBvid(url) {
@@ -146,15 +137,31 @@ function buildCurrent(current, bookmarks, history) {
 
   if (histItem && histItem.time > 0) {
     const partInfo = histItem.totalParts > 1 ? `第 ${histItem.part || 1}/${histItem.totalParts} 集 · ` : '';
-    if (subEl) subEl.textContent = `${partInfo}播放至 ${fmtTime(histItem.time)}`;
-
-    let pct = 0;
-    if (histItem.duration && histItem.duration > 0) {
-      pct = Math.min(100, Math.round((histItem.time / histItem.duration) * 100));
+    // watched 是跨会话累计的实际观看秒数（一直在采集，v1.16 才接上 UI）；
+    // formatDurationCN 对 0/非法值返回空串 → 没有该数据时不多出一段噪音文案
+    const watchedText = formatDurationCN(histItem.watched);
+    if (subEl) {
+      subEl.textContent = `${partInfo}播放至 ${fmtTime(histItem.time)}`
+        + (watchedText ? ` · 累计观影 ${watchedText}` : '');
     }
-    if (fillEl) fillEl.style.width = pct > 0 ? pct + '%' : '20%';
-    if (pctEl) pctEl.textContent = pct > 0 ? pct + '%' : fmtTime(histItem.time);
-    if (progRow) progRow.style.display = 'flex';
+
+    // overallTime = 电影内绝对位置，totalDuration = 电影总长（time 是 P 内时间，多P下不可直接相除）
+    // 旧记录无 overallTime：单P视频 time 与之等价可兜底，多P无法换算则不算百分比
+    const pos = histItem.overallTime != null
+      ? histItem.overallTime
+      : (histItem.totalParts > 1 ? null : histItem.time);
+    let pct = 0;
+    if (pos != null && histItem.totalDuration > 0) {
+      pct = Math.min(100, Math.round((pos / histItem.totalDuration) * 100));
+    }
+    // 算不出真实百分比时不画假进度（旧多P记录无 overallTime）：
+    // 用户会把条长读作进度，编造的兜底宽度等于给出错误信息。
+    // 副标题「第 X/Y 集 · 播放至 mm:ss」已如实说明位置，收起整行不损失信息。
+    if (progRow) progRow.style.display = pct > 0 ? 'flex' : 'none';
+    if (pct > 0) {
+      if (fillEl) fillEl.style.width = pct + '%';
+      if (pctEl) pctEl.textContent = pct + '%';
+    }
   } else {
     if (subEl) subEl.textContent = '点击继续观影 · 自动沉浸放映';
     if (progRow) progRow.style.display = 'none';
@@ -162,7 +169,11 @@ function buildCurrent(current, bookmarks, history) {
 
   const openBtn = $('#cinema-current-open');
   if (openBtn) {
-    openBtn.onclick = () => openVideo(current.bvid);
+    // 有观影记录时跟「最近放映」走同一条地址（分P带 ?p=，合集不带）。
+    // 只开 bvid 会落到 P1，再靠进度恢复去点真正的那一集。
+    openBtn.onclick = () => {
+      chrome.tabs.create({ url: histItem ? historyUrl(histItem) : historyUrl({ bvid: current.bvid }) });
+    };
   }
 
   const bmBtn = $('#cinema-current-bookmark');
@@ -175,11 +186,16 @@ function buildCurrent(current, bookmarks, history) {
     };
     refresh();
     bmBtn.onclick = () => {
-      chrome.runtime.sendMessage({
-        type: 'toggleBookmark',
-        bvid: current.bvid,
-        title: (histItem && histItem.title) || current.title || '',
-        pic: picUrl || '',
+    chrome.runtime.sendMessage({
+      type: 'toggleBookmark',
+      bvid: current.bvid,
+      title: (histItem && histItem.title) || current.title || '',
+      pic: picUrl || '',
+      // 弹窗里没有播放器，只能借用观影记录里已经算好的位置。
+      // 没有记录就不传：收藏打开后走片头，不编一个假的分P。
+      part: histItem && histItem.part,
+      overallTime: histItem && histItem.overallTime,
+      mode: histItem && histItem.mode,
       }, (res) => {
         if (res && typeof res.bookmarked === 'boolean') bookmarked = res.bookmarked;
         else bookmarked = !bookmarked;
@@ -187,6 +203,49 @@ function buildCurrent(current, bookmarks, history) {
       });
     };
   }
+}
+
+/** 列表行公共构建（「最近放映」与「收藏」此前各复制一份）
+ * @param {object} item             需含 bvid（title/pic 可选）
+ * @param {string} [sub]            副标题文本；空则不渲染副标题行
+ * @param {() => void} onOpen       点击或键盘激活时的打开动作
+ * @param {(row: HTMLElement) => void} [onRemove] 提供时在行尾追加「取消」按钮 */
+function buildListRow(item, sub, onOpen, onRemove) {
+  const row = document.createElement('div');
+  row.className = 'cinema-popup-item';
+  row.setAttribute('role', 'button');
+  row.setAttribute('tabindex', '0');
+  row.setAttribute('aria-label', '打开 ' + (item.title || item.bvid));
+
+  row.innerHTML = `
+    ${picHtml(item.pic, 'cinema-popup-item-pic')}
+    <div class="cinema-popup-item-info">
+      <div class="cinema-popup-item-title">${esc(item.title)}</div>
+      ${sub ? `<div class="cinema-popup-item-sub">${esc(sub)}</div>` : ''}
+    </div>
+    ${onRemove
+      ? `<button type="button" class="cinema-popup-item-remove" title="取消收藏" aria-label="取消收藏 ${esc(item.title || item.bvid)}">&times;</button>`
+      : ''}
+  `;
+
+  const activate = (e) => {
+    // 行内取消按钮的点击不算「打开」
+    if (e.target.closest && e.target.closest('.cinema-popup-item-remove')) return;
+    e.preventDefault();
+    onOpen();
+  };
+  row.addEventListener('click', activate);
+  row.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') activate(e);
+  });
+
+  if (onRemove) {
+    row.querySelector('.cinema-popup-item-remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      onRemove(row);
+    });
+  }
+  return row;
 }
 
 /** 最近观看列表 */
@@ -200,33 +259,14 @@ function renderRecent(items) {
   listEl.innerHTML = '';
   for (const item of items) {
     if (!item || !item.bvid) continue;
-    const row = document.createElement('div');
-    row.className = 'cinema-popup-item';
-    row.setAttribute('role', 'button');
-    row.setAttribute('tabindex', '0');
-    row.setAttribute('aria-label', '打开 ' + (item.title || item.bvid));
-
+    // item.time 是「该P内停住的位置」，非累计观看时长（累计是 watched，展示在 hero 卡）；
+    // 用「播放至」与 hero 卡一致，避免被读成"看了多久"
     const sub = item.totalParts > 1
-      ? `第${item.part}/${item.totalParts}集 · 已看 ${fmtTime(item.time)}`
-      : `已看 ${fmtTime(item.time)}`;
-
-    row.innerHTML = `
-      ${picHtml(item.pic, 'cinema-popup-item-pic')}
-      <div class="cinema-popup-item-info">
-        <div class="cinema-popup-item-title">${esc(item.title)}</div>
-        <div class="cinema-popup-item-sub">${esc(sub)}</div>
-      </div>
-    `;
-
-    const url = historyUrl(item);
-    row.addEventListener('click', () => chrome.tabs.create({ url }));
-    row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        chrome.tabs.create({ url });
-      }
-    });
-    listEl.appendChild(row);
+      ? `第${item.part}/${item.totalParts}集 · 播放至 ${fmtTime(item.time)}`
+      : `播放至 ${fmtTime(item.time)}`;
+    listEl.appendChild(buildListRow(item, sub, () => {
+      chrome.tabs.create({ url: historyUrl(item) });
+    }));
   }
 }
 
@@ -241,44 +281,20 @@ function renderBookmarks(items) {
   listEl.innerHTML = '';
   for (const item of items) {
     if (!item || !item.bvid) continue;
-    const row = document.createElement('div');
-    row.className = 'cinema-popup-item';
-    row.setAttribute('role', 'button');
-    row.setAttribute('tabindex', '0');
-    row.setAttribute('aria-label', '打开 ' + (item.title || item.bvid));
-
-    row.innerHTML = `
-      ${picHtml(item.pic, 'cinema-popup-item-pic')}
-      <div class="cinema-popup-item-info">
-        <div class="cinema-popup-item-title">${esc(item.title)}</div>
-      </div>
-      <button type="button" class="cinema-popup-item-remove" title="取消收藏" aria-label="取消收藏 ${esc(item.title || item.bvid)}">&times;</button>
-    `;
-
-    const url = `https://www.bilibili.com/video/${item.bvid}`;
-    row.addEventListener('click', (e) => {
-      if (e.target.closest('.cinema-popup-item-remove')) return;
-      chrome.tabs.create({ url });
-    });
-    row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        chrome.tabs.create({ url });
-      }
-    });
-
-    row.querySelector('.cinema-popup-item-remove').addEventListener('click', (e) => {
-      e.stopPropagation();
-      chrome.runtime.sendMessage({ type: 'toggleBookmark', bvid: item.bvid }, (res) => {
+    const bvid = item.bvid;
+    // 有 part 的新收藏落到那一集；旧收藏没有这个字段，bookmarkUrl 只开 bvid
+    const sub = (typeof item.part === 'number' && item.part > 1) ? `第 ${item.part} 集` : '';
+    listEl.appendChild(buildListRow(item, sub, () => {
+      chrome.tabs.create({ url: bookmarkUrl(item) });
+    }, (row) => {
+      chrome.runtime.sendMessage({ type: 'toggleBookmark', bvid }, (res) => {
         // 后台无回执也按已取消处理（toggleBookmark 语义即翻转）
         if (!res || res.bookmarked !== true) row.remove();
         if (listEl.children.length === 0) {
           listEl.innerHTML = '<div class="cinema-popup-empty">暂无收藏</div>';
         }
       });
-    });
-
-    listEl.appendChild(row);
+    }));
   }
 }
 

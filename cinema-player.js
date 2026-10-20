@@ -94,13 +94,11 @@ function applyParsedData(s) {
   const model = buildSeasonModel(s.season, curBvid);
   if (model) {
     state.seasonId = model.id;
-    state.seasonTitle = model.title;
     state.seasonSections = model.sections;
     state.seasonSectionIndex = model.sectionIndex;
     state.seasonEpisodes = model.episodes;
   } else {
     state.seasonId = 0;
-    state.seasonTitle = '';
     state.seasonSections = [];
     state.seasonSectionIndex = -1;
     state.seasonEpisodes = [];
@@ -110,7 +108,6 @@ function applyParsedData(s) {
   if (s.pages && s.pages.length > 1) {
     state.mode = 'pages';
     state.bvid = curBvid;
-    state.aid = s.aid || 0;
     state.cid = s.cid || 0;
     state.title = s.title || document.title;
     state.pic = s.pic || '';
@@ -132,7 +129,6 @@ function applyParsedData(s) {
     if (FORCED_SETTINGS.seasonMovie === true && state.seasonSectionIndex !== -1 && state.seasonEpisodes.length > 1) {
       state.mode = 'season';
       state.bvid = curBvid;
-      state.aid = s.aid || 0;
       state.cid = s.cid || 0;
       state.title = s.title || document.title;
       state.pic = s.pic || '';
@@ -150,7 +146,6 @@ function applyParsedData(s) {
     }
     state.mode = 'pages';
     state.bvid = curBvid;
-    state.aid = s.aid || 0;
     state.cid = s.cid || 0;
     state.title = s.title || document.title;
     state.pic = s.pic || '';
@@ -456,6 +451,16 @@ function switchPartViaPlayerAPI(targetPage) {
   });
 }
 
+/** 把探测到的显示模式持久化到 prefs（跨会话）。
+ * 原生全屏不记——浏览器要求用户手势，页载无法自动进入；只记 wide/web-fullscreen/normal。
+ * 与 rate/volume/quality/danmaku 同一套 savePlayerPrefs 落盘路径。 */
+function persistDisplayMode(mode) {
+  if (!mode || mode === 'fullscreen' || mode === 'normal' && state.prefs.displayMode === 'normal') return;
+  if (state.prefs.displayMode === mode) return; // 没变不写盘
+  state.prefs.displayMode = mode;
+  savePlayerPrefs();
+}
+
 /**
  * 恢复播放器到指定的显示模式（通过点击对应按钮）
  * @param {'normal'|'wide'|'web-fullscreen'|'fullscreen'} mode
@@ -713,6 +718,7 @@ function applyTempP2PBlock() {
 
 /** 预取下一分P/下一集（由 MAIN world 桥接脚本执行：拦截播放器 XHR + 直连预取） */
 async function preloadNextPart() {
+  if (!settings.enabled) return; // 总开关关掉后不再为下一集预取
   if (!FORCED_SETTINGS.preloadNext) return;
   if (state.switching || state.preloading || preloadBlocked()) return;
   // 只有最后一个分P/剧集之前才需要预取
@@ -766,9 +772,12 @@ function onPrefetchDone(e) {
     state.preloading = false;
     if (state.prefetchCancelTimer) { clearTimeout(state.prefetchCancelTimer); state.prefetchCancelTimer = null; }
     if (d && d.reason === 'busy') {
-      // B5：预取进行中被打回（busy-ack）不是失败：释放 preloadedCid 槽位让下次可重试、
-      // 清除按需去重记录，但不计失败次数、不设失败时间戳（preloading/prefetchCancelTimer 已在上方清除）
-      if (d.cid && state.preloadedCid === d.cid) state.preloadedCid = null;
+      // B5：预取进行中被打回（busy-ack）不是失败：不计失败次数、不设失败时间戳
+      // （preloading/prefetchCancelTimer 已在上方清除）。
+      // 打回的是别的 cid（悬停预取撞上正在下的自动预取）才释放槽位，否则那次悬停会
+      // 把 content 侧 preloading 卡满 30 秒兜底。打回的就是正在下的同一集时不得清槽：
+      // 清了，下一次 timeupdate 会把这一集再请求一遍。
+      if (!d.same && d.cid && state.preloadedCid === d.cid) state.preloadedCid = null;
       if (d.cid && state.onDemandPrefetch) delete state.onDemandPrefetch[d.cid];
       log(`预取被忽略（已有预取进行中）: cid=${d.cid}`);
     } else if (d && d.ok === false) {
@@ -785,9 +794,12 @@ function onPrefetchDone(e) {
         if (d.cid && state.onDemandPrefetch) delete state.onDemandPrefetch[d.cid];
         log(`预取失败(${state.preloadFailCount}次): ${d.reason || 'unknown'}`);
       }
-    } else if (d && d.ok === true) {
-      state.preloadFailCount = 0; // 成功后重置失败计数
-      state.prefetchOkCid = d.cid; // 记录已预取成功的分P cid（决定切P过渡视觉下限）
+    } else if (d && d.ok === true && d.primary === true && d.kind === 'video') {
+      // 只有主视频变体落盘才算「这一集已经热了」。音频通常先到，兜底视频变体
+      // 只拉了 1.5MB：任一先到就把 prefetchOkCid 写上，切 P 会跳过淡出并按 0ms
+      // 揭帧，画面其实还是黑的。音频失败本来就不计数，成功同样不算热。
+      state.preloadFailCount = 0;
+      state.prefetchOkCid = d.cid;
     }
   } catch (err) { console.debug('[cinema] onPrefetchDone error:', err); }
 }
@@ -954,15 +966,6 @@ function requestCloseTab() {
 //  视频监听器
 // ============================================================
 
-/** 播放/暂停时同步关灯遮罩刷新 */
-function onCinemaPlay() {
-  if (typeof updateLightsOut === 'function') updateLightsOut();
-}
-
-function onCinemaPause() {
-  if (typeof updateLightsOut === 'function') updateLightsOut();
-}
-
 function attachVideoListeners() {
   const video = state.video;
   if (!video || video.__cinemaBound) return; // 幂等：防止 season 跨BV切换时 onNavigate 与 waitForVideoChangeSeason 双路径重复挂载
@@ -974,8 +977,6 @@ function attachVideoListeners() {
   video.addEventListener('ratechange', onPlayerRateChange);
   video.addEventListener('volumechange', onPlayerVolumeChange);
   video.addEventListener('progress', onVideoProgress);
-  video.addEventListener('play', onCinemaPlay);
-  video.addEventListener('pause', onCinemaPause);
 
   // 全屏状态变化监听器：在切换期间保持显示模式
   document.addEventListener('fullscreenchange', onFullscreenChange);
@@ -997,8 +998,6 @@ function detachVideoListeners() {
   video.removeEventListener('ratechange', onPlayerRateChange);
   video.removeEventListener('volumechange', onPlayerVolumeChange);
   video.removeEventListener('progress', onVideoProgress);
-  video.removeEventListener('play', onCinemaPlay);
-  video.removeEventListener('pause', onCinemaPause);
 
   // 移除全屏状态变化监听器
   document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -1019,10 +1018,6 @@ async function onFullscreenChange() {
     if (typeof ensureSettingsPanelHost === 'function') ensureSettingsPanelHost(false);
     applySettings();
   }
-
-  // 全屏状态变化时刷新关灯遮罩（全屏自动隐藏）。force=true：绕过 500ms 节流，
-  // 避免进入/退出全屏的切换被节流吞掉导致遮罩滞后
-  updateLightsOut(true);
 
   if (!state.switching) return;
   if (state.displayMode === 'fullscreen') {
@@ -1053,6 +1048,9 @@ function onVideoReady() {
     updateUnifiedProgress();
   }
 
+  // B1(v1.18)：分P元数据就绪 → 刷新系统媒体卡片标题。覆盖任意切P路径
+  // （含 B站原生选集点击 / SPA 导航，这些不经 switchToPart 落地钩子）
+  if (typeof updateMediaSession === 'function') updateMediaSession();
 }
 
 /** 缓冲区间变化时刷新进度条上的缓冲显示 */
@@ -1068,15 +1066,31 @@ function onTimeUpdate() {
   const currentTime = video.currentTime;
   const duration = video.duration || (state.pages[state.currentIndex] || {}).duration || 0;
 
-  // 观影统计：累计实际观看秒数（seek 跳动 >5s 或回退不计）
+  // 观影统计：累计实际观看秒数（seek 跳动 >5s 或回退不计）。
+  // 总开关关掉后仍记：重新打开时进度恢复要用，不能把这段观看丢掉。
   const wd = currentTime - state.lastWatchTick;
   if (state.lastWatchTick > 0 && wd >= 0.1 && wd <= 5) {
     state.watchAccum += wd;
   }
   state.lastWatchTick = currentTime;
 
-  // 无缝电影：片尾 0.6s 钉末帧；再提前 ~0.35s 开切，别等 ended 才动手（那是卡顿主因）
+  // 总开关只藏界面不够：关掉后不得再提前切 P、预取、或弹出关标签页提示。
+  // 进度保存留在下面，关掉再打开仍能从原地续看。
+  // 不再调 updateUnifiedProgress——它内部会按 disabled 隐藏进度条/还原底栏，
+  // 原实现 disabled 时不进这条路径，别给进度条逻辑一个每秒 4 次的入口。
+  if (!settings.enabled) {
+    if (Math.abs(currentTime - lastSavedTime) >= 5) {
+      lastSavedTime = currentTime;
+      saveProgress();
+    }
+    return;
+  }
+
+  // 无缝电影：片尾 0.6s 钉末帧；再提前 ~0.35s 开切，别等 ended 才动手（那是卡顿主因）。
+  // 仅多P电影钉帧：单P freezes会把 B站原生结束层（重播/推荐）永久盖住——
+  // 多P的钉帧由 switchToPart 成功路径 unfreeze，单P没有这条路径。
   if (FORCED_SETTINGS.seamlessMovie !== false && FORCED_SETTINGS.autoPlayNext
+      && state.isMultiPart
       && state.currentIndex < state.pages.length - 1
       && duration > 2 && (duration - currentTime) >= 0) {
     const remain = duration - currentTime;
@@ -1097,8 +1111,10 @@ function onTimeUpdate() {
   }
 
   // B2 提前预取：缓冲充足（readyState>=3 且缓冲末端领先当前 ≥25s）时立即预取，
-  // 不必等剩余 <60s 才触发（preloadedCid 已去重，只会发一次请求）
-  if (FORCED_SETTINGS.preloadNext && video.readyState >= 3 && currentBufferedEnd() - currentTime >= 25) {
+  // 不必等剩余 <60s 才触发（preloadedCid 已去重，只会发一次请求）。
+  // 本轮只扫一次 video.buffered，结果同时供进度条缓冲层复用
+  const bufEnd = currentBufferedEnd();
+  if (FORCED_SETTINGS.preloadNext && video.readyState >= 3 && bufEnd - currentTime >= 25) {
     preloadNextPart();
   }
 
@@ -1114,11 +1130,8 @@ function onTimeUpdate() {
     captureDanmakuState();
   }
 
-  // 更新统一进度条
-  updateUnifiedProgress();
-
-  // 关灯遮罩跟随播放器位置（布局可能变化）
-  updateLightsOut();
+  // 更新统一进度条（透传本轮缓冲末端，避免二次扫描）
+  updateUnifiedProgress(bufEnd);
 
   // 定期保存进度（每 5 秒）
   if (Math.abs(currentTime - lastSavedTime) >= 5) {
@@ -1128,6 +1141,7 @@ function onTimeUpdate() {
 }
 
 function onVideoEnded() {
+  if (!settings.enabled) return; // 总开关关掉后片尾不再自动连播
   if (state.switching) return; // 无缝提前切已经在飞，ended 不再重入
   if (!FORCED_SETTINGS.autoPlayNext) return;
   if (state.currentIndex < state.pages.length - 1) {
@@ -1143,6 +1157,16 @@ function onVideoEnded() {
     // B11：影院式结束流程（压制原生自动连播 + 关标签页提示）仅对多分P电影生效；
     // 单视频（isMultiPart=false）保持 B站原生结束行为，不压制其自动连播偏好。
     if (state.isMultiPart) {
+      // 最后一集钉末帧：电影已落幕，不让 B站原生推荐墙瞬间盖住谢幕画面。
+      // freezeFrame 的 canvas 是 pointer-events:none——点击天然穿透到原生结束层（重播/推荐墙）。
+      // 这里在 wrap 捕获阶段挂一次性监听：首次点击/keydown 立即 unfreeze + 放行，
+      // 让 B站原生结束层在同一手势接管（用户只感觉"点了一下就出了推荐"），不做自己的结束卡。
+      if (typeof freezeFrame === 'function' && !state.freezeArmed) {
+        state.freezeArmed = true;
+        freezeFrame();
+        const wrap = state.playerWrap;
+        if (wrap && typeof armFreezeRelease === 'function') armFreezeRelease(wrap);
+      }
       suppressNativeAutoplay();
       maybeSuggestCloseTab(); // 最后P：提示自动关闭标签页
     }
@@ -1199,7 +1223,11 @@ function suppressNativeAutoplay() {
 //  分P切换
 // ============================================================
 
+/** 自动播放下一分P（fire-and-forget：内部调用 switchToPart，不阻塞调用方）。
+ * 提前切的 finally 会先清掉 switching，新片的 ended 若在首帧之前到来会再进一次，
+ * 于是连跳一整 P。advanceTarget 记下这次要去的下标，落地或失败前拒绝再开一次。 */
 async function goToNextPart() {
+  if (state.advanceTarget != null) return;
   if (state.currentIndex >= state.pages.length - 1) return;
   switchToPart(state.currentIndex + 1, null);
 }
@@ -1218,6 +1246,9 @@ async function jumpToPart(targetIndex, offsetSeconds) {
  */
 async function switchToPart(targetIndex, offsetSeconds) {
   if (state.switching) return;
+  // 同一次自动连播还没落地时，ended 重入会再开一轮并跳过一整 P。
+  // 手动跳转（offsetSeconds 非空，进度条/恢复卡）不走这条，失败后仍能立刻重试。
+  if (offsetSeconds == null && state.advanceTarget != null) return;
   if (targetIndex < 0 || targetIndex >= state.pages.length) return;
   // 同P：仅 seek，不做任何切换流程
   if (targetIndex === state.currentIndex) {
@@ -1229,6 +1260,7 @@ async function switchToPart(targetIndex, offsetSeconds) {
   if (typeof hideSwitchRecovery === 'function') hideSwitchRecovery();
   if (state.switchRecoveryPoll) { clearInterval(state.switchRecoveryPoll); state.switchRecoveryPoll = null; }
   state.switching = true;
+  if (offsetSeconds == null) state.advanceTarget = targetIndex;
   const targetPart = state.pages[targetIndex];
   cancelPrefetch({ keepCid: targetPart && targetPart.cid }); // 目标P预取保留，供秒开
 
@@ -1249,8 +1281,12 @@ async function switchToPart(targetIndex, offsetSeconds) {
       fadeOutVolume(curVideo || state.video, useSeamlessCover() ? 80 : 200);
     }
 
-    // 记录当前显示模式（普通/宽屏/网页全屏/全屏）
+    // 记录当前显示模式（普通/宽屏/网页全屏/全屏）。
+    // 同时持久化到 prefs：跨会话恢复时按此还原。原生全屏不记——浏览器要求用户手势，
+    // 页载无法自动进入；只探测到 wide/web-fullscreen/normal 才写，fullscreen 跳过
+    // （页载探测不到 fullscreen 时旧的 wide/web-fullscreen 值还能用）。
     state.displayMode = await getPlayerDisplayMode();
+    persistDisplayMode(state.displayMode);
 
     log(`切换到 第${targetPart.page}集: ${targetPart.part}`);
 
@@ -1263,7 +1299,7 @@ async function switchToPart(targetIndex, offsetSeconds) {
       const targetBvid = targetPart.bvid || (state.seasonEpisodes[targetIndex] && state.seasonEpisodes[targetIndex].bvid);
       const switched = tryClickSeasonEpisode(targetIndex);
       if (!switched) {
-        sessionStorage.setItem('cinemaDisplayMode', state.displayMode);
+        state.advanceTarget = null; // 整页跳转不再回来清标记；跳转没走成也不能把下一次连播卡住
         location.href = `https://www.bilibili.com/video/${targetBvid}`;
         return; // 即将离开当前页，finally 会清理 switching
       }
@@ -1276,7 +1312,7 @@ async function switchToPart(targetIndex, offsetSeconds) {
       } else {
         const switched = tryClickNextPart(targetIndex);
         if (!switched) {
-          sessionStorage.setItem('cinemaDisplayMode', state.displayMode);
+          state.advanceTarget = null; // 同上：整页跳转路径不再回来清连播标记
           const url = `https://www.bilibili.com/video/${state.bvid}?p=${targetPart.page}`;
           location.href = url;
           return; // 即将离开当前页，finally 会清理 switching
@@ -1285,11 +1321,14 @@ async function switchToPart(targetIndex, offsetSeconds) {
       }
     }
 
-    // 切换失败：揭掉冻帧并展示恢复卡片（不保留 switching 锁，交给用户选择）
+    // 切换失败：揭掉冻帧并展示恢复卡片（不保留 switching 锁，交给用户选择）。
+    // 连播标记一并清掉，否则恢复卡的重试会被「上一次还没落地」挡掉。
     if (ok === false) {
+      state.advanceTarget = null;
       log('分P切换失败，展示恢复操作');
       if (typeof unfreezeFrame === 'function') unfreezeFrame();
       state.freezeArmed = false;
+      disarmFreezeRelease();
       // 还原淡出遗留的静音（失败路径不经过 armAudioFadeIn）：用淡入平滑恢复原音量，
       // 避免直接 unmute 造成"砰"的爆音（B6）；fadeSnapshot 已清则跳过
       if (state.fadeSnapshot && state.video) {
@@ -1319,10 +1358,15 @@ async function switchToPart(targetIndex, offsetSeconds) {
     }
     syncBridgeConfig(); // 更新桥接脚本的 currentCid（播放器请求当前P的 playurl 时不命中缓存）
 
-    // 等新分P首帧再撤冻帧（无缝电影也要等，否则会露黑屏）
+    // 等新分P首帧再撤冻帧（无缝电影也要等，否则会露黑屏）。
+    // 首帧到了这一次连播才算落地：在此之前 ended 重入会被 advanceTarget 挡下。
     await holdTransitionUntilFrame(3500);
+    state.advanceTarget = null;
     if (typeof unfreezeFrame === 'function') unfreezeFrame();
     state.freezeArmed = false;
+    disarmFreezeRelease(); // 切P成功路上顺手解除，免得钉末帧监听残留到下一切换
+    // B1(v1.18)：切换落地、currentIndex 已定 → 权威刷新系统媒体卡片到新一集
+    if (typeof updateMediaSession === 'function') updateMediaSession();
 
     // 预取状态重置：目标P已变化，允许重新预取
     state.preloadedCid = null;
@@ -1336,6 +1380,23 @@ async function switchToPart(targetIndex, offsetSeconds) {
   } finally {
     state.switching = false;
   }
+}
+
+/**
+ * 定位当前视频的选集容器：推荐区同样使用 .video-pod__item，全局 nth-child 兜底
+ * 会点到其他视频的卡片并导航离开当前页。用「含本视频任一已知 cid 的条目」反查
+ * 其所属容器作为安全作用域（目标 cid 未渲染时其他 cid 仍可能命中，如列表分页/虚拟化）。
+ * @returns {Element|null} 无法确定作用域时返回 null，调用方跳过该兜底
+ */
+function findOwnEpisodeScope() {
+  for (const p of state.pages) {
+    if (!p.cid) continue;
+    const el = document.querySelector(`.video-pod__item[data-key="${p.cid}"]`);
+    if (el) {
+      return el.closest('.video-pod, .video-section-block, .video-sections, .multi-page') || el.parentElement;
+    }
+  }
+  return null;
 }
 
 function tryClickNextPart(targetIndex) {
@@ -1356,13 +1417,9 @@ function tryClickNextPart(targetIndex) {
     // 新版播放器内分P列表
     `.bpx-player-ep-item[data-ep="p${targetPage}"]`,
     `.bpx-player-ep-item:nth-child(${targetPage})`,
-    // 新版视频下方选集面板（新版 B 站：.video-pod__item 是 div 且内部无 <a>，需直接点击 div）
-    `.video-pod__item:nth-child(${targetPage})`,
     // 旧版视频下方分P列表
     `.list-box li[data-page="${targetPage}"] a`,
     `.list-box a[href*="p=${targetPage}"]`,
-    // 旧版选集面板（带 a 标签的兼容写法）
-    `.video-pod__item:nth-child(${targetPage}) a`,
     `.multi-page .list-box a[href*="p=${targetPage}"]`,
     // 通用：包含 p=N 的链接（B站可能把 p 放在 URL 末尾：?a=b&p=N）
     `a[href*="/video/${state.bvid}"][href*="p=${targetPage}"]`,
@@ -1374,6 +1431,22 @@ function tryClickNextPart(targetIndex) {
     if (el) {
       el.click();
       return true;
+    }
+  }
+
+  // 新版视频下方选集面板（.video-pod__item 是 div 且内部无 <a>，需直接点击 div）：
+  // 必须限定在本视频的选集容器内查找，否则会点到推荐区其他视频并导航离开当前页
+  const podScope = findOwnEpisodeScope();
+  if (podScope) {
+    for (const sel of [
+      `.video-pod__item:nth-child(${targetPage})`,
+      `.video-pod__item:nth-child(${targetPage}) a`,
+    ]) {
+      const el = podScope.querySelector(sel);
+      if (el) {
+        el.click();
+        return true;
+      }
     }
   }
 
@@ -1398,6 +1471,7 @@ function tryClickNextPart(targetIndex) {
 function waitForPlayerAPISwitch(expectedIndex) {
   return new Promise((resolve) => {
     const expectedDuration = state.pages[expectedIndex] ? state.pages[expectedIndex].duration : 0;
+    const epoch = state.switchEpoch || 0; // cleanup 自增后，残留轮询不得再改新页面
     let done = false;
     let verified = false; // 是否真正确认过目标分P就绪（page+duration 匹配）
     let metaTimer = null;
@@ -1407,6 +1481,11 @@ function waitForPlayerAPISwitch(expectedIndex) {
       done = true;
       if (state.video) state.video.removeEventListener('loadedmetadata', onMeta);
       if (metaTimer) clearTimeout(metaTimer);
+      // 代际已变：页面已被拆掉。只收尾定时器，不写 currentIndex、不点播放。
+      if (state.switchEpoch !== epoch) {
+        resolve(false);
+        return;
+      }
       if (ok) {
         // 仅确认成功才乐观设置 currentIndex / 恢复播放；硬失败保持原索引，交调用方恢复
         state.currentIndex = expectedIndex;
@@ -1434,6 +1513,10 @@ function waitForPlayerAPISwitch(expectedIndex) {
     let attempts = 0;
     const poll = () => {
       if (done) return;
+      if (state.switchEpoch !== epoch) {
+        finish(false);
+        return;
+      }
       attempts++;
 
       // 视频元素可能被替换
@@ -1513,59 +1596,79 @@ function tryClickSeasonEpisode(targetIndex) {
 }
 
 /**
+ * 切P落地轮询骨架（分P/合集两路等待共用；此前是两份同构实现，改一处极易漏另一处）。
+ * 只负责：每 intervalMs 探测一次 → probe 命中即 resolve(true)；cleanup/重新初始化导致
+ * switchEpoch 变化则立即 resolve(false) 作废本次等待；超过 maxAttempts 交 onTimeout 决定结果。
+ * 落地副作用（换 video 元素、写 currentIndex/bvid/cid、自动播放、刷进度）与超时恢复
+ * （整页跳转或放弃）均由调用方的 probe/onTimeout 提供，本函数不碰。
+ * @param {{probe: () => boolean, onTimeout: () => boolean,
+ *          maxAttempts?: number, intervalMs?: number}} opts
+ * @returns {Promise<boolean>}
+ */
+function pollUntil(opts) {
+  const probe = opts.probe;
+  const onTimeout = opts.onTimeout;
+  const maxAttempts = typeof opts.maxAttempts === 'number' ? opts.maxAttempts : 100; // 默认约 10 秒
+  const intervalMs = typeof opts.intervalMs === 'number' ? opts.intervalMs : 100;
+
+  return new Promise((resolve) => {
+    let attempts = 0;
+    const epoch = state.switchEpoch || 0; // 快照切换代际：cleanup 后残留轮询立即作废
+
+    const check = () => {
+      if (state.switchEpoch !== epoch) {
+        resolve(false); // 已发生 cleanup/重新初始化：不在新页面继续 mutate 状态
+        return;
+      }
+      attempts++;
+      if (probe()) {
+        resolve(true);
+        return;
+      }
+      if (attempts >= maxAttempts) {
+        resolve(onTimeout());
+        return;
+      }
+      setTimeout(check, intervalMs);
+    };
+
+    check();
+  });
+}
+
+/**
  * 等待分P切换落地（通过 URL p 参数 + 视频元素变化判断）
  * @returns {Promise<boolean>} true=切换成功或已发起整页跳转（离开当前页）；false=超时且无恢复手段
  */
 function waitForVideoChange(expectedIndex) {
-  return new Promise((resolve) => {
-    let attempts = 0;
-    const maxAttempts = 100; // 最多等 10 秒
-    const epoch = state.switchEpoch || 0; // 快照当前切换代际：cleanup 后新页面残留轮询立即作废
-
-    const check = () => {
-      // 切换代际已变（cleanup/重新初始化发生过）：放弃对旧切换的收尾，不在新页面继续 mutate 状态
-      if (state.switchEpoch !== epoch) {
-        resolve(false);
-        return;
+  return pollUntil({
+    probe: () => {
+      if (getCurrentPage() !== expectedIndex + 1) return false;
+      const video = findVideo();
+      // URL 已更新，等待视频元素就绪
+      if (video && video !== state.video) {
+        detachVideoListeners();
+        state.video = video;
+        state.currentIndex = expectedIndex;
+        attachVideoListeners();
+        tryAutoPlay();
+        updateUnifiedProgress();
+        return true;
       }
-      attempts++;
-      const newPage = getCurrentPage();
-
-      if (newPage === expectedIndex + 1) {
-        // URL 已更新，等待视频元素就绪
-        const video = findVideo();
-        if (video && video !== state.video) {
-          detachVideoListeners();
-          state.video = video;
-          state.currentIndex = expectedIndex;
-          attachVideoListeners();
-          tryAutoPlay();
-          updateUnifiedProgress();
-          resolve(true);
-          return;
-        }
-        // 视频元素可能还没换，继续等
-        if (video && video.readyState >= 1) {
-          state.currentIndex = expectedIndex;
-          tryAutoPlay();
-          updateUnifiedProgress();
-          resolve(true);
-          return;
-        }
+      // 视频元素可能还没换，继续等
+      if (video && video.readyState >= 1) {
+        state.currentIndex = expectedIndex;
+        tryAutoPlay();
+        updateUnifiedProgress();
+        return true;
       }
-
-      if (attempts >= maxAttempts) {
-        log('等待视频切换超时，尝试刷新');
-        sessionStorage.setItem('cinemaDisplayMode', state.displayMode);
-        location.href = `https://www.bilibili.com/video/${state.bvid}?p=${expectedIndex + 1}`;
-        resolve(true); // 已发起整页跳转（即将离开当前页），按已处理返回
-        return;
-      }
-
-      setTimeout(check, 100);
-    };
-
-    check();
+      return false;
+    },
+    onTimeout: () => {
+      log('等待视频切换超时，尝试刷新');
+      location.href = `https://www.bilibili.com/video/${state.bvid}?p=${expectedIndex + 1}`;
+      return true; // 已发起整页跳转（即将离开当前页），按已处理返回
+    },
   });
 }
 
@@ -1574,62 +1677,37 @@ function waitForVideoChange(expectedIndex) {
  * @returns {Promise<boolean>} true=切换成功或已发起整页跳转；false=超时且无目标 bvid 可恢复
  */
 function waitForVideoChangeSeason(expectedIndex) {
-  return new Promise((resolve) => {
-    let attempts = 0;
-    const maxAttempts = 100;
-    const expectedBvid = state.seasonEpisodes[expectedIndex]
-      ? state.seasonEpisodes[expectedIndex].bvid
-      : '';
-    const epoch = state.switchEpoch || 0; // 快照当前切换代际：cleanup 后新页面残留轮询立即作废
+  const expectedBvid = state.seasonEpisodes[expectedIndex]
+    ? state.seasonEpisodes[expectedIndex].bvid
+    : '';
 
-    const check = () => {
-      // 切换代际已变（cleanup/重新初始化发生过）：放弃对旧切换的收尾，不在新页面继续 mutate 状态
-      if (state.switchEpoch !== epoch) {
-        resolve(false);
-        return;
-      }
-      attempts++;
+  return pollUntil({
+    probe: () => {
+      if (!expectedBvid) return false;
       const currentBvid = getBvid();
-
-      if (expectedBvid && currentBvid === expectedBvid) {
-        const video = findVideo();
-        if (video && video.readyState >= 1) {
-          if (video !== state.video) {
-            detachVideoListeners();
-            state.video = video;
-            attachVideoListeners();
-          }
-          state.currentIndex = expectedIndex;
-          state.bvid = currentBvid;
-          // 同步 cid/aid，避免子合集内切换后 state.cid/state.aid 停留在旧剧集
-          const landed = state.seasonEpisodes[expectedIndex] || state.pages[expectedIndex];
-          if (landed) {
-            if (landed.cid != null) state.cid = landed.cid;
-            if (landed.aid != null) state.aid = landed.aid;
-          }
-          tryAutoPlay();
-          updateUnifiedProgress();
-          resolve(true);
-          return;
-        }
+      if (currentBvid !== expectedBvid) return false;
+      const video = findVideo();
+      if (!video || video.readyState < 1) return false;
+      if (video !== state.video) {
+        detachVideoListeners();
+        state.video = video;
+        attachVideoListeners();
       }
-
-      if (attempts >= maxAttempts) {
-        log('等待合集视频切换超时，尝试直接跳转');
-        if (expectedBvid) {
-          sessionStorage.setItem('cinemaDisplayMode', state.displayMode);
-          location.href = `https://www.bilibili.com/video/${expectedBvid}`;
-          resolve(true); // 已发起整页跳转（即将离开当前页），按已处理返回
-        } else {
-          resolve(false); // 无目标 bvid，无法恢复
-        }
-        return;
-      }
-
-      setTimeout(check, 100);
-    };
-
-    check();
+      state.currentIndex = expectedIndex;
+      state.bvid = currentBvid;
+      // 同步 cid，避免子合集内切换后 state.cid 停留在旧剧集
+      const landed = state.seasonEpisodes[expectedIndex] || state.pages[expectedIndex];
+      if (landed && landed.cid != null) state.cid = landed.cid;
+      tryAutoPlay();
+      updateUnifiedProgress();
+      return true;
+    },
+    onTimeout: () => {
+      log('等待合集视频切换超时，尝试直接跳转');
+      if (!expectedBvid) return false; // 无目标 bvid，无法恢复
+      location.href = `https://www.bilibili.com/video/${expectedBvid}`;
+      return true; // 已发起整页跳转（即将离开当前页），按已处理返回
+    },
   });
 }
 
@@ -1687,8 +1765,51 @@ function holdTransitionUntilFrame(maxMs) {
   });
 }
 
+/** 停掉尚未走完的淡出。SPA 换页若复用同一个 video 节点，残留的 interval
+ * 会在新片子上继续把音量写成 0 并 mute。 */
+function cancelFadeOut() {
+  if (state.fadeOutTimer) {
+    clearInterval(state.fadeOutTimer);
+    state.fadeOutTimer = null;
+  }
+}
+
+/**
+ * 最后一集钉末帧后挂的一次性放行：freeze canvas 本身 pointer-events:none，
+ * 点击天然穿透到 B站原生结束层（重播/推荐墙）。这里在 wrap 捕获阶段挂
+ * pointerdown/keydown 一次性监听：首个手势立即 unfreeze，**不 stopPropagation**，
+ * 让同一个手势继续被原生结束层接管（用户感觉"点了一下就出推荐"）。
+ * 绑一次防泄漏；SPA cleanup / 下一次 freeze / 手动跳P 都会重置。
+ */
+function armFreezeRelease(wrap) {
+  if (!wrap || wrap.__cinemaFreezeReleaseArmed) return;
+  wrap.__cinemaFreezeReleaseArmed = true;
+  const release = () => {
+    disarmFreezeRelease(wrap);
+    if (typeof unfreezeFrame === 'function') unfreezeFrame();
+    state.freezeArmed = false;
+  };
+  wrap.__cinemaFreezeRelease = release;
+  wrap.addEventListener('pointerdown', release, { capture: true, once: true });
+  wrap.addEventListener('keydown', release, { capture: true, once: true });
+}
+
+/** 解除钉末帧放行监听（切P成功/cleanup/手动跳P 时调用，幂等） */
+function disarmFreezeRelease(wrap) {
+  if (!wrap) wrap = state.playerWrap;
+  if (!wrap || !wrap.__cinemaFreezeReleaseArmed) return;
+  const release = wrap.__cinemaFreezeRelease;
+  if (release) {
+    wrap.removeEventListener('pointerdown', release, { capture: true });
+    wrap.removeEventListener('keydown', release, { capture: true });
+  }
+  wrap.__cinemaFreezeReleaseArmed = false;
+  wrap.__cinemaFreezeRelease = null;
+}
+
 /** 音量渐变到 0（切P前淡出 P1，避免声音硬切） */
 function fadeOutVolume(video, ms) {
+  cancelFadeOut(); // 上一次淡出还没走完就又切：停掉，避免两段渐变抢同一个 volume
   state.fadeSnapshot = null; // 每次切P先清快照：静音/音量0早退时不得沿用旧快照（防静音用户被误淡入）
   if (!video || video.muted || video.volume <= 0) return;
   state.fadeSnapshot = { volume: video.volume }; // 记录淡出快照：只有真正淡出过才允许淡入
@@ -1696,11 +1817,11 @@ function fadeOutVolume(video, ms) {
   const steps = 10;
   const interval = ms / steps;
   let i = 0;
-  const timer = setInterval(() => {
+  state.fadeOutTimer = setInterval(() => {
     i++;
     video.volume = Math.max(0, startVol * (1 - i / steps));
     if (i >= steps) {
-      clearInterval(timer);
+      cancelFadeOut();
       video.muted = true;
       video.volume = startVol; // 恢复 volume 值（muted 状态下不发声），淡入时 unmute
     }
@@ -1818,14 +1939,43 @@ function armSwitchRecoveryWatch(targetIndex) {
 //  进度恢复
 // ============================================================
 
+/** 打开收藏时落在记下的那一集：读一次收藏，只取当前 bvid 上真实写过的 part / overallTime。
+ * 旧收藏没有这两个字段返回 null，调用方继续用观影进度。不写进 cinemaProgress——
+ * 收藏是「我想从这里看」，进度是「上次停在这里」，两者不能互相覆盖。 */
+function readBookmarkResume(bvid) {
+  return new Promise((resolve) => {
+    try {
+      if (typeof readBookmarks !== 'function') { resolve(null); return; }
+      readBookmarks((list) => {
+        const hit = (list || []).find((b) => b && b.bvid === bvid);
+        if (!hit || typeof hit.part !== 'number' || typeof hit.overallTime !== 'number') {
+          resolve(null);
+          return;
+        }
+        const offset = overallToPartOffset(state.cumulative, hit.overallTime);
+        if (!offset) { resolve(null); return; }
+        resolve({ part: offset.index + 1, time: offset.offset, ts: Date.now(), bvid: bvid, mode: state.mode });
+      });
+    } catch { resolve(null); }
+  });
+}
+
 async function restoreProgress() {
+  // 地址栏带了 ?p= 且这一集正是收藏记下的那一集：用收藏的电影时间。
+  // 否则（直接打开、或打开的是另一集）仍用观影进度，避免收藏把别的集拽过来。
   const progress = await loadProgress(state.bvid);
-  if (!progress) return;
+  const bookmarked = await readBookmarkResume(state.bvid);
+  // 只在地址栏明确打开了收藏的那一集、且观影进度停在别的集（或根本没有进度）时，
+  // 才用收藏的时间。同一集上观影进度永远优先：收藏不该把「上次看到这里」盖掉。
+  const openedBookmarkPart = bookmarked && getCurrentPage() === bookmarked.part
+    && !(progress && progress.part === bookmarked.part);
+  const resume = openedBookmarkPart ? bookmarked : progress;
+  if (!resume) return;
 
-  // 超过 7 天的进度不恢复
-  if (Date.now() - progress.ts > 7 * 24 * 3600 * 1000) return;
+  // 超过 7 天的进度不恢复。收藏恢复的 ts 是刚刚读到的，不会被这条挡下。
+  if (Date.now() - resume.ts > 7 * 24 * 3600 * 1000) return;
 
-  const targetPartIndex = progress.part - 1;
+  const targetPartIndex = resume.part - 1;
   if (targetPartIndex < 0 || targetPartIndex >= state.pages.length) return;
 
   // B11/Important #4：单集视频（无分P）只恢复播放位置，不做分P跳转（part 必为 1，自然跳过下方跳转分支）。
@@ -1833,16 +1983,16 @@ async function restoreProgress() {
   // bvid 存在但与当前不一致则跳过（避免把别的视频的进度误套到本视频上）。
   const singlePage = state.pages.length <= 1;
   if (singlePage) {
-    if (progress.bvid && progress.bvid !== state.bvid) return;
-    if (!progress.bvid && getProgressKey() !== state.bvid) return;
+    if (resume.bvid && resume.bvid !== state.bvid) return;
+    if (!resume.bvid && getProgressKey() !== state.bvid) return;
   }
 
   // 修2：合集（season）模式只恢复"同一集"的进度，绝不跨集恢复——
   // 合集所有分集共用一个 section 级进度键，直接打开合集内另一集的链接/刷新时，
   // 若强行跳回上次看的集会把用户拽走。bvid 缺失（极老记录）或与当前集不一致一律跳过，
   // 宁可不恢复也不乱跳（不再 tryClickSeasonEpisode / location.href 兜底）。
-  if (state.mode === 'season' || progress.mode === 'season') {
-    if (!progress.bvid || progress.bvid !== state.bvid) {
+  if (state.mode === 'season' || resume.mode === 'season') {
+    if (!resume.bvid || resume.bvid !== state.bvid) {
       log('合集模式：进度记录与当前集不一致，跳过跨集恢复');
       return;
     }
@@ -1852,7 +2002,7 @@ async function restoreProgress() {
   state.restoringProgress = true;
 
   if (targetPartIndex !== state.currentIndex) {
-    log(`恢复进度：跳转到 第${progress.part}集`);
+    log(`恢复进度：跳转到 第${resume.part}集`);
     state.switching = true; // 阻止 onNavigate 抢夺 currentIndex
     try {
       // pages 模式：同 bvid 多P 的跨P恢复是电影模型的一部分，保持原样。
@@ -1868,7 +2018,7 @@ async function restoreProgress() {
   }
 
   // 恢复播放位置
-  if (state.video && progress.time > 0) {
+  if (state.video && resume.time > 0) {
     // 修3：B站 SPA 切集复用同一 <video> 元素——注册 loadedmetadata 前捕获当前 video 引用
     // 与 currentIndex，触发时若视频元素已被替换或 currentIndex 已变化（元数据加载前手动切集），
     // 丢弃本次 seek，避免陈旧 once 监听在新视频上误 seek 到旧集的保存时间。
@@ -1879,9 +2029,9 @@ async function restoreProgress() {
       if (state.video !== videoAtSchedule || state.currentIndex !== indexAtSchedule) return;
       if (state.video && state.video.readyState >= 1) {
         // 留 2 秒缓冲，避免 seek 到精确位置时卡顿
-        state.video.currentTime = Math.max(0, progress.time - 2);
+        state.video.currentTime = Math.max(0, resume.time - 2);
         tryAutoPlay();
-        log(`恢复播放位置: ${formatTime(progress.time)}`);
+        log(`恢复播放位置: ${formatTime(resume.time)}`);
       }
     };
     if (state.video.readyState >= 1) {

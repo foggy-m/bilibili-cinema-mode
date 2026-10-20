@@ -4,7 +4,6 @@
 
 /* --- 设计令牌 --- */
 :root {
-  --c-radius-pill: 999px;
   --c-shadow-pop: 0 12px 40px rgba(0, 0, 0, .65), 0 2px 10px rgba(0, 0, 0, .4);
   --c-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --c-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
@@ -12,11 +11,13 @@
 
 /* --- 主题令牌（影院模式自有面板/徽章等 UI；不动 B站页面） ---
    light = 现有半透明深色玻璃面板（保持老用户观感不变）
-   dark  = 更深的近黑面板 + B站蓝强调 + 高对比文字 */
+   dark  = 更深的近黑面板 + B站蓝强调 + 高对比文字
+   注：v1.12 设置项 18→2 键后遗留的零引用令牌（--c-radius-pill/
+   --c-panel-bg-solid/--c-row-hover/--c-chip-bg/--c-caret/--c-option-bg/
+   --c-overlay-bg/--c-badge-info/--c-badge-success）已随 v1.15 死代码清剿删除 */
 :root,
 [data-cinema-theme="light"] {
   --c-panel-bg: rgba(18, 18, 22, 0.95);
-  --c-panel-bg-solid: rgba(18, 18, 22, 0.98);
   --c-panel-border: rgba(255, 255, 255, 0.1);
   --c-text: #fff;
   --c-text-dim: rgba(255, 255, 255, 0.85);
@@ -30,20 +31,12 @@
   --c-input-bg: rgba(255, 255, 255, 0.1);
   --c-input-border: rgba(255, 255, 255, 0.2);
   --c-hover-bg: rgba(255, 255, 255, 0.06);
-  --c-row-hover: rgba(255, 255, 255, 0.16);
   --c-divider: rgba(255, 255, 255, 0.08);
-  --c-chip-bg: rgba(0, 0, 0, 0.55);
-  --c-caret: rgba(255, 255, 255, 0.6);
-  --c-option-bg: #1c1c1c;
-  --c-overlay-bg: rgba(0, 0, 0, 0.62);
-  --c-badge-info: rgba(0, 161, 214, 0.9);
-  --c-badge-success: rgba(0, 180, 90, 0.9);
   --c-badge-error: rgba(220, 50, 50, 0.9);
 }
 
 [data-cinema-theme="dark"] {
   --c-panel-bg: rgba(7, 9, 13, 0.97);
-  --c-panel-bg-solid: rgba(9, 11, 16, 0.99);
   --c-panel-border: rgba(0, 161, 214, 0.3);
   --c-text: #f4f6f8;
   --c-text-dim: rgba(244, 246, 248, 0.88);
@@ -57,14 +50,7 @@
   --c-input-bg: rgba(255, 255, 255, 0.08);
   --c-input-border: rgba(0, 161, 214, 0.4);
   --c-hover-bg: rgba(0, 161, 214, 0.14);
-  --c-row-hover: rgba(0, 161, 214, 0.24);
   --c-divider: rgba(0, 161, 214, 0.2);
-  --c-chip-bg: rgba(0, 0, 0, 0.78);
-  --c-caret: rgba(0, 181, 229, 0.9);
-  --c-option-bg: #0d1117;
-  --c-overlay-bg: rgba(0, 0, 0, 0.7);
-  --c-badge-info: rgba(0, 161, 214, 0.95);
-  --c-badge-success: rgba(0, 190, 95, 0.95);
   --c-badge-error: rgba(230, 55, 55, 0.95);
 }
 
@@ -208,7 +194,7 @@
   transition: none;
 }
 
-/* 悬停预览气泡（紧凑精致微型分镜：画面缩略图 + 时间码 + 紧凑分P标签，避免遮挡大面积画面） */
+/* 悬停预览气泡（时间码 + 近边界/跨P时的分P标签；无画面缩略图——videoshot 已按 SPEC §2 拒绝） */
 #cinema-progress-tooltip {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -245,7 +231,9 @@ body.cinema-bottom-progress .squirtle-progress-wrap {
   overflow: visible !important;
 }
 
-/* 底部接管时隐藏原生进度条层与原生悬浮提示，防止视觉重合冲突 */
+/* 底部接管时隐藏原生进度条层与原生悬浮提示，防止视觉重合冲突。
+   接管模式下同时隐藏顶栏与互动弹幕：插件已接管整条时间线，避免两套控制并存。
+   （cinema-active 仅负责去水印本身；顶栏/cmd-dm 只在接管进度条时才藏，单P保留） */
 body.cinema-bottom-progress .bpx-player-progress-schedule,
 body.cinema-bottom-progress .bpx-player-progress-buffer,
 body.cinema-bottom-progress .bpx-player-progress-shadow,
@@ -253,7 +241,9 @@ body.cinema-bottom-progress .bpx-player-progress-floating,
 body.cinema-bottom-progress .bpx-player-progress-popup,
 body.cinema-bottom-progress .squirtle-progress-schedule,
 body.cinema-bottom-progress .squirtle-progress-buffer,
-body.cinema-bottom-progress .squirtle-progress-tooltip {
+body.cinema-bottom-progress .squirtle-progress-tooltip,
+body.cinema-bottom-progress .bpx-player-top-wrap,
+body.cinema-bottom-progress .bpx-player-cmd-dm-wrap {
   opacity: 0 !important;
   pointer-events: none !important;
 }
@@ -434,12 +424,6 @@ body.cinema-bottom-progress .squirtle-progress-tooltip {
   background: var(--c-hover-bg);
 }
 
-.cinema-sp-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 /* 子行（数值 / 滑杆 / 说明） */
 .cinema-sp-sub {
   display: flex;
@@ -588,24 +572,6 @@ body.cinema-bottom-progress .squirtle-progress-tooltip {
 .cinema-sp-toggle input:focus-visible + .cinema-sp-toggle-track {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
-}
-
-/* 全局总开关关闭时，子级开关灰置且不可交互（原生 disabled 阻止切换） */
-.cinema-sp-toggle:has(input:disabled) {
-  cursor: not-allowed;
-  color: var(--c-text-mute);
-}
-
-.cinema-sp-toggle:has(input:disabled):hover {
-  color: var(--c-text-mute);
-}
-
-.cinema-sp-toggle:has(input:disabled) .cinema-sp-toggle-label {
-  color: var(--c-text-mute);
-}
-
-.cinema-sp-toggle:has(input:disabled) .cinema-sp-toggle-track {
-  opacity: 0.4;
 }
 
 /* ============================================================
@@ -799,56 +765,13 @@ body.cinema-bottom-progress .squirtle-progress-tooltip {
   }
 }
 
-/* ============================================================
-   关灯模式（压暗播放器外区域 + 电影胶片暗角）
-   ============================================================ */
-
-#cinema-lights-out {
-  position: fixed;
-  z-index: 9998;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, var(--cinema-lights-out-opacity, 0.85));
-}
-
-#cinema-lights-out.on {
-  opacity: 1;
-}
-
-/* 电影级胶片暗角与聚光景深（Cinematic Vignette & Spotlight） */
-#cinema-vignette {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 4; /* 位于视频上层、HUD 控件下层 */
-  opacity: 0;
-  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  background: radial-gradient(
-    ellipse at center,
-    rgba(0, 0, 0, 0) 42%,
-    rgba(0, 0, 0, 0.22) 72%,
-    rgba(0, 0, 0, 0.6) 100%
-  );
-  box-shadow: inset 0 0 60px 20px rgba(0, 0, 0, 0.5);
-}
-
-#cinema-vignette.active {
-  opacity: 1;
-}
-
-/* 纯净暗场与影院模式去干扰：在影院模式开启或全屏暗场播放时，彻底隐藏/淡化右上角 UP 主名称与 Bilibili 水印 */
+/* 纯净暗场与影院模式去干扰：影院模式开启时，彻底隐藏/淡化右上角 UP 主名称与 Bilibili 水印 */
 body.cinema-active .bpx-player-watermark,
 body.cinema-active .bpx-player-watermark-image,
 body.cinema-active .bilibili-player-watermark,
 body.cinema-active .bpx-player-top-issue,
 body.cinema-active .bpx-player-video-top,
 body.cinema-active .bpx-player-video-top-issue,
-body.cinema-active .bpx-player-top-wrap,
-body.cinema-active .bpx-player-cmd-dm-wrap,
 body.cinema-active [class*="player-watermark"],
 body.cinema-active [class*="bpx-player-watermark"],
 body.cinema-active [class*="squirtle-watermark"],
@@ -864,8 +787,6 @@ body.cinema-active [class*="top-issue"],
 .cinema-active .bpx-player-top-issue,
 .cinema-active .bpx-player-video-top,
 .cinema-active .bpx-player-video-top-issue,
-.cinema-active .bpx-player-top-wrap,
-.cinema-active .bpx-player-cmd-dm-wrap,
 .cinema-active [class*="player-watermark"],
 .cinema-active [class*="bpx-player-watermark"],
 .cinema-active [class*="squirtle-watermark"],
@@ -874,41 +795,7 @@ body.cinema-active [class*="top-issue"],
 .cinema-active .squirtle-top,
 .cinema-active [class*="watermark"],
 .cinema-active img[src*="watermark"],
-.cinema-active [class*="top-issue"],
-body.cinema-lights-out-active .bpx-player-watermark,
-body.cinema-lights-out-active .bpx-player-watermark-image,
-body.cinema-lights-out-active .bilibili-player-watermark,
-body.cinema-lights-out-active .bilibili-player-video-top,
-body.cinema-lights-out-active .bpx-player-top-issue,
-body.cinema-lights-out-active .bpx-player-video-top,
-body.cinema-lights-out-active .bpx-player-video-top-issue,
-body.cinema-lights-out-active .bpx-player-top-wrap,
-body.cinema-lights-out-active .bpx-player-cmd-dm-wrap,
-body.cinema-lights-out-active [class*="player-watermark"],
-body.cinema-lights-out-active [class*="bpx-player-watermark"],
-body.cinema-lights-out-active [class*="squirtle-watermark"],
-body.cinema-lights-out-active .squirtle-video-top,
-body.cinema-lights-out-active .squirtle-top,
-body.cinema-lights-out-active [class*="watermark"],
-body.cinema-lights-out-active img[src*="watermark"],
-body.cinema-lights-out-active [class*="top-issue"],
-.cinema-lights-out-active .bpx-player-watermark,
-.cinema-lights-out-active .bpx-player-watermark-image,
-.cinema-lights-out-active .bilibili-player-watermark,
-.cinema-lights-out-active .bilibili-player-video-top,
-.cinema-lights-out-active .bpx-player-top-issue,
-.cinema-lights-out-active .bpx-player-video-top,
-.cinema-lights-out-active .bpx-player-video-top-issue,
-.cinema-lights-out-active .bpx-player-top-wrap,
-.cinema-lights-out-active .bpx-player-cmd-dm-wrap,
-.cinema-lights-out-active [class*="player-watermark"],
-.cinema-lights-out-active [class*="bpx-player-watermark"],
-.cinema-lights-out-active [class*="squirtle-watermark"],
-.cinema-lights-out-active .squirtle-video-top,
-.cinema-lights-out-active .squirtle-top,
-.cinema-lights-out-active [class*="watermark"],
-.cinema-lights-out-active img[src*="watermark"],
-.cinema-lights-out-active [class*="top-issue"] {
+.cinema-active [class*="top-issue"] {
   opacity: 0 !important;
   pointer-events: none !important;
   transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;

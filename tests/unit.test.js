@@ -136,6 +136,142 @@ test('overallToPartOffset 定位', () => {
   assert.strictEqual(utils.overallToPartOffset(cumulative, -1), null);
 });
 
+test('overallFromPart 为 overallToPartOffset 的逆运算', () => {
+  const { cumulative } = utils.buildCumulative([600, 900, 300]);
+  // 电影内 1050s → P2 内 450s → 再换回 1050s
+  const at = utils.overallToPartOffset(cumulative, 1050);
+  assert.strictEqual(at.index, 1);
+  assert.strictEqual(at.offset, 450);
+  // part 为 1-based 分P号（= index + 1）
+  assert.strictEqual(utils.overallFromPart(cumulative, at.index + 1, at.offset), 1050);
+  // 每个分P起点都应回到该 P 的前缀和
+  for (let i = 0; i < cumulative.length - 1; i++) {
+    assert.strictEqual(utils.overallFromPart(cumulative, i + 1, 0), cumulative[i]);
+  }
+});
+
+test('overallFromPart 边界与非法输入', () => {
+  const cumulative = [0, 600, 1500, 1800];
+  assert.strictEqual(utils.overallFromPart(cumulative, 1, 120), 120);
+  // part 缺失/0 → 视为第 1 个 P
+  assert.strictEqual(utils.overallFromPart(cumulative, undefined, 120), 120);
+  assert.strictEqual(utils.overallFromPart(cumulative, 0, 120), 120);
+  // time 缺失 → 只返回该 P 起始偏移
+  assert.strictEqual(utils.overallFromPart(cumulative, 3), 1500);
+  // 越界 part / cumulative 缺失 → 偏移按 0 处理，不抛错
+  assert.strictEqual(utils.overallFromPart(cumulative, 99, 50), 50);
+  assert.strictEqual(utils.overallFromPart(null, 2, 50), 50);
+  assert.strictEqual(utils.overallFromPart([], 1, 50), 50);
+  // 单P视频：overallTime 与 P 内时间等价（旧记录无 overallTime 时可用 time 兜底的依据）
+  const single = utils.buildCumulative([1200]);
+  assert.strictEqual(utils.overallFromPart(single.cumulative, 1, 700), 700);
+});
+
+test('观影记录总进度：必须用 overallTime 而非 P 内 time 除以电影总长', () => {
+  // 3 个分P 600/900/300 秒（电影总长 1800s），停在第 2 个 P 的 450 秒处
+  const { cumulative, totalDuration } = utils.buildCumulative([600, 900, 300]);
+  const part = 2;
+  const time = 450;
+  const overall = utils.overallFromPart(cumulative, part, time);
+  assert.strictEqual(overall, 1050);
+  assert.strictEqual(Math.min(100, Math.round((overall / totalDuration) * 100)), 58);
+  // 反例：直接拿 P 内时间除以电影总长 → 25%，正是修复前的错误口径
+  assert.strictEqual(Math.round((time / totalDuration) * 100), 25);
+  // 反例：除以不存在的 duration 字段 → 恒为 0（popup 进度条卡在 20% 兜底的成因）
+  const histItem = { time, totalDuration };
+  assert.strictEqual(histItem.duration && histItem.duration > 0 ? 1 : 0, 0);
+});
+
+test('isClickSuppressed：拖拽后 click 抑制窗口', () => {
+  const stamp = 10000;
+  // 窗口内应抑制
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10100), true);
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10499), true);
+  // 右边界为严格小于：正好 500ms 不再抑制（否则慢一点的 click 会被误吞）
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10500), false);
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10501), false);
+  assert.strictEqual(utils.isClickSuppressed(stamp, 99000), false);
+  // 从未拖拽（stamp 为 0 / 空）不抑制
+  assert.strictEqual(utils.isClickSuppressed(0, 10000), false);
+  assert.strictEqual(utils.isClickSuppressed(undefined, 10000), false);
+  assert.strictEqual(utils.isClickSuppressed(null, 10000), false);
+  // 自定义窗口；缺省即 500
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10300, 200), false);
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10300, 400), true);
+  assert.strictEqual(utils.isClickSuppressed(stamp, 10300, undefined), true);
+  // 时钟回拨（now 早于 stamp）：沿用原内联式语义判为抑制，此行为已被测试固化
+  assert.strictEqual(utils.isClickSuppressed(stamp, 9000), true);
+});
+
+test('formatDurationCN：累计观看时长的中文可读输出', () => {
+  // 无数据/非法一律空串，由调用方隐藏整段文案（避免"累计观影 0 分钟"噪音）
+  assert.strictEqual(utils.formatDurationCN(0), '');
+  assert.strictEqual(utils.formatDurationCN(-10), '');
+  assert.strictEqual(utils.formatDurationCN(undefined), '');
+  assert.strictEqual(utils.formatDurationCN(NaN), '');
+  assert.strictEqual(utils.formatDurationCN('abc'), '');
+  // 不足 1 分钟归为"1 分钟内"，不给假精确的秒数
+  assert.strictEqual(utils.formatDurationCN(30), '1 分钟内');
+  assert.strictEqual(utils.formatDurationCN(59), '1 分钟内');
+  assert.strictEqual(utils.formatDurationCN(60), '1 分钟');
+  assert.strictEqual(utils.formatDurationCN(3599), '59 分钟');
+  assert.strictEqual(utils.formatDurationCN(3600), '1 小时');      // 整点不带"0 分"
+  assert.strictEqual(utils.formatDurationCN(4320), '1 小时 12 分');
+  assert.strictEqual(utils.formatDurationCN('7325'), '2 小时 2 分'); // 字符串入参
+});
+
+test('sanitizeBookmarkList：条目消毒、去重与容量截断', () => {
+  assert.deepStrictEqual(utils.sanitizeBookmarkList(null), []);
+  assert.deepStrictEqual(utils.sanitizeBookmarkList('nope'), []);
+  // 丢掉非对象与无 bvid 的脏条目
+  assert.deepStrictEqual(utils.sanitizeBookmarkList([null, { title: 'x' }, 5, { bvid: 'BV1' }]), [{ bvid: 'BV1' }]);
+  // 同 bvid 只保留先出现的那个
+  const dedup = utils.sanitizeBookmarkList([{ bvid: 'BV1', n: 1 }, { bvid: 'BV1', n: 2 }, { bvid: 'BV2' }]);
+  assert.strictEqual(dedup.length, 2);
+  assert.strictEqual(dedup[0].n, 1);
+  // 默认容量 50，超出丢尾部（约定最新在前）
+  const many = Array.from({ length: 60 }, (_, i) => ({ bvid: 'BV' + i }));
+  const capped = utils.sanitizeBookmarkList(many);
+  assert.strictEqual(capped.length, 50);
+  assert.strictEqual(capped[0].bvid, 'BV0');
+  assert.strictEqual(capped[49].bvid, 'BV49');
+  // 显式 cap 覆盖默认
+  assert.strictEqual(utils.sanitizeBookmarkList(many, 3).length, 3);
+});
+
+test('toggleBookmarkEntry：新增在最新前、命中即移除、缺 bvid 不切换', () => {
+  const t = (list, meta, cap) => utils.toggleBookmarkEntry(list, meta, cap, 123);
+  // 新增
+  const add = t([], { bvid: 'BV1', title: '片名', pic: 'p.jpg' });
+  assert.strictEqual(add.bookmarked, true);
+  assert.deepStrictEqual(add.list, [{ bvid: 'BV1', title: '片名', pic: 'p.jpg', ts: 123 }]);
+  // 已有则移除
+  const off = t([{ bvid: 'BV1' }, { bvid: 'BV2' }], { bvid: 'BV1' });
+  assert.strictEqual(off.bookmarked, false);
+  assert.deepStrictEqual(off.list, [{ bvid: 'BV2' }]);
+  // 新条目插到最前（最新在前）
+  const front = t([{ bvid: 'BV2' }], { bvid: 'BV1' });
+  assert.strictEqual(front.list[0].bvid, 'BV1');
+  // 缺 bvid 不切换，但列表仍被消毒
+  const noBvid = t([{ bvid: 'BV1' }, null, 7], {}, undefined);
+  assert.strictEqual(noBvid.bookmarked, false);
+  assert.deepStrictEqual(noBvid.list, [{ bvid: 'BV1' }]);
+  // 给了真实的分P号和电影时间才写入；缺了就保持旧书签的样子，不编进度
+  const placed = t([], { bvid: 'BV1', title: '片名', part: 3, overallTime: 1050 });
+  assert.strictEqual(placed.list[0].part, 3);
+  assert.strictEqual(placed.list[0].overallTime, 1050);
+  const bare = t([], { bvid: 'BV1', part: 0, overallTime: -1 });
+  assert.strictEqual(bare.list[0].part, undefined);
+  assert.strictEqual(bare.list[0].overallTime, undefined);
+  const notANumber = t([], { bvid: 'BV1', part: 'P3', overallTime: 'later' });
+  assert.strictEqual(notANumber.list[0].part, undefined);
+  assert.strictEqual(notANumber.list[0].overallTime, undefined);
+  // 去重 + 容量同时生效
+  const dup = t([{ bvid: 'BV1' }, { bvid: 'BV1' }], { bvid: 'BV9' }, 2);
+  assert.strictEqual(dup.bookmarked, true);
+  assert.deepStrictEqual(dup.list.map((b) => b.bvid), ['BV9', 'BV1']);
+});
+
 // ========== 新增：sidx / 分段预取 / Range 头 / 区间覆盖 ==========
 
 /** 大端序写入无符号整数（构造 sidx 用） */
@@ -486,10 +622,51 @@ test('buildSectionProgressKey id 与 title 均缺失用 i<index>', () => {
   assert.strictEqual(utils.buildSectionProgressKey(42, { id: '', title: '', index: 2 }), 'season_42_si2');
 });
 
+test('bookmarkUrl：有分P才带 ?p=，旧书签与合集只开片头', () => {
+  assert.strictEqual(utils.bookmarkUrl({ bvid: 'BV1', part: 3 }), 'https://www.bilibili.com/video/BV1?p=3');
+  // 第 1 集不带参数，和「最近放映」的 historyUrl 同一口径
+  assert.strictEqual(utils.bookmarkUrl({ bvid: 'BV1', part: 1 }), 'https://www.bilibili.com/video/BV1');
+  // 旧书签没有 part：不编一个分P号
+  assert.strictEqual(utils.bookmarkUrl({ bvid: 'BV1' }), 'https://www.bilibili.com/video/BV1');
+  // 合集的集与集是不同 bvid，?p= 没有意义
+  assert.strictEqual(
+    utils.bookmarkUrl({ bvid: 'BV1', part: 4, mode: 'season' }),
+    'https://www.bilibili.com/video/BV1'
+  );
+  assert.strictEqual(utils.bookmarkUrl(null), '');
+  assert.strictEqual(utils.bookmarkUrl({}), '');
+});
+
 test('buildSectionProgressKey section 为空返回 _s?', () => {
   assert.strictEqual(utils.buildSectionProgressKey(42, null), 'season_42_s?');
   assert.strictEqual(utils.buildSectionProgressKey(42, undefined), 'season_42_s?');
   assert.strictEqual(utils.buildSectionProgressKey(42, 0), 'season_42_s?');
+});
+
+test('partDisplayLabel season：集号取 index+1，忽略 part.page', () => {
+  // season 用下标 +1 作集号，即使 part.page 是别的值也不看
+  assert.strictEqual(utils.partDisplayLabel('season', 0, { page: 9, part: '第一话' }), '第1集 · 第一话');
+  assert.strictEqual(utils.partDisplayLabel('season', 4, { page: 99, part: 'X' }), '第5集 · X');
+});
+
+test('partDisplayLabel pages：用 part.page 作分P号', () => {
+  assert.strictEqual(utils.partDisplayLabel('pages', 0, { page: 3, part: '正片' }), 'P3 · 正片');
+  assert.strictEqual(utils.partDisplayLabel('pages', 2, { page: 7, part: '' }), 'P7');
+});
+
+test('partDisplayLabel 无名/纯空白：不带「 · 」后缀', () => {
+  assert.strictEqual(utils.partDisplayLabel('season', 1, { page: 2 }), '第2集');
+  assert.strictEqual(utils.partDisplayLabel('pages', 0, { page: 2, part: '' }), 'P2');
+  assert.strictEqual(utils.partDisplayLabel('pages', 0, { page: 2, part: '   ' }), 'P2');
+});
+
+test('partDisplayLabel 名称两端空白被 trim', () => {
+  assert.strictEqual(utils.partDisplayLabel('pages', 0, { page: 2, part: '  标题  ' }), 'P2 · 标题');
+});
+
+test('partDisplayLabel 空 part 返回空串（season/pages 一致）', () => {
+  assert.strictEqual(utils.partDisplayLabel('pages', 0, null), '');
+  assert.strictEqual(utils.partDisplayLabel('season', 0, undefined), '');
 });
 
 

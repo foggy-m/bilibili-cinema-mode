@@ -19,7 +19,6 @@ window.__bilibiliCinemaMode = true;
 const DEFAULT_SETTINGS = {
   enabled: true,
   autoCloseTab: false,  // 播放完毕自动关闭标签页
-  lightsOut: false,     // 关灯模式（压暗播放器外区域，默认关；L 键运行时切换）
 };
 
 // 内化设置（禅：有选项 = 作者不确定什么是对的）。面板不再暴露，存储旧值被覆写。
@@ -36,14 +35,12 @@ const SHORTCUT_DEFAULTS = {
   nextPart: 'KeyN',
   prevPart: 'KeyP',
   toggleSettings: 'KeyS',
-  toggleLights: 'KeyL',
   // I-2：seek 用 J/K 而非方向键 —— B站播放器原生也响应方向键 seek，
   // 扩展再全局监听方向键会造成"双重 seek"（一次按键跳 20 秒）
   seekBack: 'KeyJ',
   seekForward: 'KeyK',
 };
 
-const CINEMA_OPACITY = 0.85;       // 关灯压暗（原 lightsOutOpacity）
 const CINEMA_P2P_TEMP_MS = 4000;   // 切P窗口临时 P2P 屏蔽时长（原 p2pTempMs）
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -51,7 +48,6 @@ let settings = { ...DEFAULT_SETTINGS };
 const state = {
   bvid: '',
   cid: 0,
-  aid: 0,
   title: '',
   pages: [],            // [{ page, cid, part, duration, vid, weblink }]
   currentIndex: 0,      // 0-based
@@ -69,15 +65,14 @@ const state = {
   // 合集/选集模式
   mode: 'pages',        // 'pages' | 'season'
   seasonId: 0,          // ugc_season.id
-  seasonTitle: '',      // 合集名称
   seasonSections: [],        // [{ id, title, index, episodes: [{index,bvid,cid,aid,title,duration,id}] }]
   seasonSectionIndex: -1,    // 当前 bvid 所在子合集在 seasonSections 中的下标；-1 = 未命中
   seasonEpisodes: [],   // [{ index, bvid, cid, title, duration, id }]
   // 显示模式保持
   displayMode: 'normal', // 'normal' | 'wide' | 'web-fullscreen' | 'fullscreen'
-  // 播放设置记忆（画质/倍速/音量/弹幕）
+  // 播放设置记忆（画质/倍速/音量/弹幕/显示模式）
   pic: '',              // 视频封面图
-  prefs: { rate: 1, volume: 1, quality: '', danmaku: true },
+  prefs: { rate: 1, volume: 1, quality: '', danmaku: true, displayMode: 'normal' },
   prefsLoaded: false,
   restoringPrefs: false,
   prefsGuardUntil: 0,   // 恢复后保护期，避免恢复动作被误记录
@@ -280,6 +275,9 @@ function updateWatchHistory(progressKey, data) {
   try {
     readAllHistory((hist) => {
       const prev = hist[progressKey] || {};
+      // time 是 P 内 currentTime，totalDuration 是整部电影总长，口径不同不可直接相除；
+      // overallTime = 该 P 起始偏移 + P 内时间 = 电影内绝对位置（纯函数见 cinema-utils.js）
+      const overallTime = overallFromPart(state.cumulative, data.part, data.time);
       hist[progressKey] = {
         bvid: state.bvid,
         title: state.title || state.bvid,
@@ -287,6 +285,7 @@ function updateWatchHistory(progressKey, data) {
         part: data.part,
         totalParts: state.pages.length,
         time: data.time,
+        overallTime,
         totalDuration: state.totalDuration || 0,
         mode: state.mode,
         ts: Date.now(),
@@ -301,6 +300,7 @@ function updateWatchHistory(progressKey, data) {
           delete hist[keys[i]];
         }
       }
+      historyCache = hist; // 防抖落盘前就换上：下一次 5 秒保存必须看到这次并入的 watched
       scheduleHistoryWrite(hist);
     });
   } catch (err) { console.debug('[cinema] updateWatchHistory error:', err); }
@@ -309,14 +309,40 @@ function updateWatchHistory(progressKey, data) {
 let historyWriteTimer = null; // 观影记录防抖写定时器（模块级共用）
 let historyWriteGen = 0;      // 防抖写代际计数：导入/清除定时器等直接写路径会自增，
                               // 挂起的旧防抖任务过期后跳过，避免用旧快照覆盖导入结果
+let historyCache = null;      // 合并后的 { progressKey: record }；null = 还没读过
+let historyCacheListener = false;
+
+/** 别的设备改了观影记录时丢掉内存副本，下一次保存重新读。
+ * 本页自己的写入不丢：否则每 10 秒的防抖写都会把缓存打掉，5 秒一轮的保存又变回全量读。 */
+function onHistoryStorageChanged(changes, area) {
+  if (area !== 'sync' || !changes) return;
+  for (const key of Object.keys(changes)) {
+    if (key === 'cinemaHistoryMeta' || /^cinemaHistory_c\d+$/.test(key)) {
+      if (historyWriteTimer) return;
+      historyCache = null;
+      return;
+    }
+  }
+}
 
 /**
- * 读取全部观影记录，回调参数为合并后的 { progressKey: record }
+ * 读取全部观影记录，回调参数为合并后的 { progressKey: record }。
+ * 读过一次后留在 historyCache：播放中每 5 秒保存不再全量读 sync。
  * sync 分块为空且 local 存在旧 cinemaHistory blob 时：用 local 数据回调，
- * 并异步迁移（立即写一次 sync 分块 + 移除 local）
+ * 并异步迁移（立即写一次 sync 分块 + 移除 local）。
  */
 function readAllHistory(cb) {
   if (typeof cb !== 'function') cb = function () {};
+  if (!historyCacheListener) {
+    historyCacheListener = true;
+    try { chrome.storage.onChanged.addListener(onHistoryStorageChanged); } catch { /* ignore */ }
+  }
+  // 播放中每 5 秒进一次这里。缓存命中就不再 chrome.storage.sync.get(null)：
+  // 那一次会把设置、全部历史分块和收藏都拉回来，再触发跨设备 onChanged。
+  if (historyCache) {
+    cb(historyCache);
+    return;
+  }
   try {
     chrome.storage.sync.get(null, (all) => {
       const hist = {};
@@ -331,6 +357,7 @@ function readAllHistory(cb) {
       } catch (e) { console.debug('[cinema] readAllHistory merge error:', e); }
 
       if (Object.keys(hist).length > 0) {
+        historyCache = hist;
         cb(hist);
         return;
       }
@@ -339,6 +366,7 @@ function readAllHistory(cb) {
         chrome.storage.local.get('cinemaHistory', (r2) => {
           const old = (r2 && r2.cinemaHistory) || {};
           if (old && typeof old === 'object' && Object.keys(old).length > 0) {
+            historyCache = old;
             cb(old);
             try {
               writeAllHistory(old);
@@ -346,6 +374,7 @@ function readAllHistory(cb) {
             } catch (e) { console.debug('[cinema] history migration error:', e); }
             return;
           }
+          historyCache = hist;
           cb(hist);
         });
       } catch (e) {
@@ -390,6 +419,13 @@ function writeAllHistory(hist, cb) {
         : 0;
       try {
         chrome.storage.sync.set(data, () => {
+          // 配额拒绝时 lastError 被置位，数据没写进去。丢掉内存副本，
+          // 下次保存重新读，避免这份没落盘的快照盖掉别的设备已经写成功的记录。
+          if (chrome.runtime.lastError) {
+            historyCache = null;
+            console.debug('[cinema] writeAllHistory quota:', chrome.runtime.lastError.message);
+            return;
+          }
           try {
             if (oldChunks > newChunks) {
               const removeKeys = [];
@@ -480,7 +516,7 @@ function loadPlayerPrefs() {
     try {
       chrome.storage.local.get('cinemaPrefs', (result) => {
         if (result && result.cinemaPrefs) {
-          state.prefs = { rate: 1, volume: 1, quality: '', danmaku: true, ...result.cinemaPrefs };
+          state.prefs = { rate: 1, volume: 1, quality: '', danmaku: true, displayMode: 'normal', ...result.cinemaPrefs };
           // 存量数据清洗：旧版本曾把静音状态折算为 volume=0 落盘（"莫名其妙静音"根因），
           // 新逻辑不再产生 0（muted 时不记录）；读到 0 视为污染，重置为 1 并回写落盘
           if (state.prefs.volume === 0) {
@@ -505,10 +541,10 @@ function savePlayerPrefs() {
 }
 
 // ============================================================
-//  收藏（C16：按 bvid 收藏视频，sync 持久化，数组最新在前，容量 50）
+//  收藏（C16：按 bvid 收藏视频，sync 持久化，数组最新在前）
+//  消毒/去重/容量截断与切换语义的唯一实现在 cinema-utils.js
+//  （sanitizeBookmarkList / toggleBookmarkEntry），background 侧共用同一份
 // ============================================================
-
-const BOOKMARK_LIMIT = 50;
 
 let bookmarksCache = []; // 内存缓存：readBookmarks 回填，isBookmarked/toggleBookmark 同步使用
 
@@ -531,16 +567,8 @@ function readBookmarks(cb) {
 /** 写入收藏列表：消毒（仅对象条目、按 bvid 去重）+ 容量截断（最新在前，超限丢最旧），完成后回调 */
 function writeBookmarks(list, cb) {
   try {
-    const arr = Array.isArray(list) ? list.slice() : [];
-    const seen = {};
-    const clean = [];
-    for (const it of arr) {
-      if (!it || typeof it !== 'object' || !it.bvid) continue;
-      if (seen[it.bvid]) continue;
-      seen[it.bvid] = true;
-      clean.push(it);
-    }
-    while (clean.length > BOOKMARK_LIMIT) clean.pop();
+    // 消毒与容量截断的唯一实现在 cinema-utils.js（background 侧走同一函数，防行为分叉）
+    const clean = sanitizeBookmarkList(list);
     bookmarksCache = clean;
     chrome.storage.sync.set({ cinemaBookmarks: clean }, () => {
       if (typeof cb === 'function') cb();
@@ -564,22 +592,10 @@ function toggleBookmark(meta) {
     try {
       readBookmarks((list) => {
         try {
-          const idx = list.findIndex((b) => b && b.bvid === bvid);
-          let nowBookmarked;
-          if (idx !== -1) {
-            list.splice(idx, 1);
-            nowBookmarked = false;
-          } else {
-            list.unshift({
-              bvid: bvid,
-              title: (meta.title || ''),
-              pic: (meta.pic || ''),
-              ts: Date.now(),
-            });
-            nowBookmarked = true;
-          }
-          writeBookmarks(list); // 内部同步刷新 bookmarksCache 并持久化
-          resolve(nowBookmarked);
+          // 切换语义与 background 共用 cinema-utils.js 的同一实现
+          const res = toggleBookmarkEntry(list, meta);
+          writeBookmarks(res.list); // 内部同步刷新 bookmarksCache 并持久化
+          resolve(res.bookmarked);
         } catch (e) { resolve(isBookmarked(bvid)); }
       });
     } catch (e) { resolve(isBookmarked(bvid)); }

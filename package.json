@@ -1,10 +1,11 @@
 {
   "name": "bilibili-cinema-mode",
-  "version": "1.10.1",
+  "version": "1.18.0",
   "description": "将B站分P与合集视频整合为单部电影体验的浏览器扩展（Manifest V3）",
   "main": "content.js",
   "scripts": {
-    "test": "node --test tests/unit.test.js"
+    "test": "node --test tests/unit.test.js",
+    "check": "node --check cinema-utils.js && node --check cinema-core.js && node --check cinema-player.js && node --check cinema-ui.js && node --check content.js && node --check background.js && node --check popup.js && node --check player-bridge.js && node --test tests/unit.test.js"
   },
   "keywords": [
     "bilibili",

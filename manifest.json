@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "B站影院模�?- 分P无缝连播",
-  "version": "1.11.0",
-  "description": "B站影院模式：将多分P/合集视频整合为一部完整电影——无缝自动连播、跨P统一进度条、进度记忆、关灯净化、快捷键控制；设置入口支�?S �?/ 双击播放�?/ 扩展弹窗",
+  "name": "B站影院模式 - 分P无缝连播",
+  "version": "1.18.0",
+  "description": "B站影院模式：将多分P/合集视频整合为一部完整电影——无缝自动连播、跨P统一进度条、进度记忆、水印净化、快捷键控制；设置入口支持 S 键 / 双击播放器 / 扩展弹窗",
   "permissions": [
     "storage",
     "tabs"
@@ -14,7 +14,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "B站影院模�?,
+    "default_title": "B站影院模式",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"

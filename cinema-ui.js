@@ -12,13 +12,10 @@ let ui = {
   buffered: null,
   markers: null,
   tooltip: null,
-  timeLabel: null,
-  partLabel: null,
   freezeCanvas: null, // 切P冻结帧遮罩 canvas（切换时保持 P1 末帧，消除黑屏）
   settingsPanel: null,
   statusBadge: null,
   closeTip: null,       // 播完自动关闭标签页提示气泡
-  lightsOut: null,      // 关灯模式遮罩
   switchRecovery: null, // 切P失败恢复卡片
 };
 
@@ -45,7 +42,17 @@ function toggleCurrentBookmark() {
   if (!state.bvid) return;
   try {
     if (typeof toggleBookmark !== 'function') return;
-    const r = toggleBookmark({ bvid: state.bvid, title: state.title || '', pic: state.pic || '' });
+    // 记的是这一集的电影时间，不是整部剧的片头。没有正在播的片子就不写这两个字段：
+    // 旧书签缺字段时打开走片头，不编一个假进度。
+    const bookmarkMeta = { bvid: state.bvid, title: state.title || '', pic: state.pic || '' };
+    if (state.video && state.pages.length > 0) {
+      bookmarkMeta.part = state.currentIndex + 1;
+      bookmarkMeta.overallTime = overallFromPart(
+        state.cumulative, bookmarkMeta.part, state.video.currentTime || 0
+      );
+      if (state.mode) bookmarkMeta.mode = state.mode;
+    }
+    const r = toggleBookmark(bookmarkMeta);
     // 用 toggleBookmark 返回的新状态更新 UI（勿立即重读缓存）
     if (r && typeof r.then === 'function') {
       r.then(() => updateBookmarkButton()).catch(() => {});
@@ -247,12 +254,6 @@ function createUI() {
   if (ui.bar) ui.bar.remove();
   if (ui.tooltip) ui.tooltip.remove();
   if (ui.settingsPanel) ui.settingsPanel.remove();
-  if (ui.vignette) ui.vignette.remove();
-
-  // --- 电影级胶片暗角与聚光景深（Cinematic Vignette） ---
-  ui.vignette = document.createElement('div');
-  ui.vignette.id = 'cinema-vignette';
-  wrap.appendChild(ui.vignette);
 
   // B2：wrap 的 dblclick 在此统一绑定一次
   // （见 bindWrapListeners），避免 SPA 复用容器时监听叠加
@@ -438,7 +439,10 @@ function resolvePrefetchPageNum(el) {
 //  统一进度条：更新 / 悬停预览 / 拖拽 / 跳转
 // ============================================================
 
-function updateUnifiedProgress() {
+/** 更新统一进度条。
+ * @param {number} [bufEndCached] 已缓冲区间末端（秒）；调用方本轮算过则透传，
+ *        避免 onTimeUpdate 每个 tick 对 video.buffered 扫描两次。省略时自行计算。 */
+function updateUnifiedProgress(bufEndCached) {
   const video = state.video;
   if (!video || !ui.fill) return;
 
@@ -460,10 +464,19 @@ function updateUnifiedProgress() {
   const overallTime = (state.cumulative[state.currentIndex] || 0) + currentTime;
   const pct = state.totalDuration > 0 ? (overallTime / state.totalDuration) * 100 : 0;
 
-  // 同步 slider 无障碍值（取整秒；高频调用下仅写字符串属性，开销可接受）
+  // 同步 slider 无障碍值（取整秒）：整秒不变则跳过——本函数在 timeupdate 下约 4Hz 调用，
+  // 缓存挂在元素自身，进度条重建后新元素无缓存会自动重写一次
   if (ui.bar) {
-    ui.bar.setAttribute('aria-valuenow', String(Math.round(overallTime)));
-    ui.bar.setAttribute('aria-valuemax', String(Math.round(state.totalDuration || 0)));
+    const ariaNow = String(Math.round(overallTime));
+    if (ui.bar._ariaNow !== ariaNow) {
+      ui.bar._ariaNow = ariaNow;
+      ui.bar.setAttribute('aria-valuenow', ariaNow);
+    }
+    const ariaMax = String(Math.round(state.totalDuration || 0));
+    if (ui.bar._ariaMax !== ariaMax) {
+      ui.bar._ariaMax = ariaMax;
+      ui.bar.setAttribute('aria-valuemax', ariaMax);
+    }
   }
 
   // 拖拽预览期间不覆盖 fill 宽度（由拖拽逻辑控制）
@@ -473,15 +486,7 @@ function updateUnifiedProgress() {
 
   // 缓冲进度：取包含当前时间的缓冲区间末端，映射到电影总时间线
   if (ui.buffered) {
-    let bufEnd = 0;
-    try {
-      const buffered = video.buffered;
-      for (let i = 0; i < buffered.length; i++) {
-        if (buffered.start(i) <= currentTime + 0.5 && buffered.end(i) > bufEnd) {
-          bufEnd = buffered.end(i);
-        }
-      }
-    } catch { /* ignore */ }
+    const bufEnd = typeof bufEndCached === 'number' ? bufEndCached : currentBufferedEnd();
     const overallBuf = (state.cumulative[state.currentIndex] || 0) + bufEnd;
     ui.buffered.style.width = state.totalDuration > 0
       ? Math.min(100, (overallBuf / state.totalDuration) * 100) + '%'
@@ -492,29 +497,40 @@ function updateUnifiedProgress() {
   updateBottomTimeDisplay(state.totalDuration);
 }
 
+/** 进度条几何快照：事件处理器应在最开头读一次并向下透传——
+ *  此刻布局干净，getBoundingClientRect 不触发强制同步重排；
+ *  若在一次事件内多次读取并与 class/style 写操作交错，每次读都会重算布局。
+ *  未透传时各函数回退自读，兼容点击/键盘等单事件路径。 */
+function barRect() {
+  return ui.bar ? ui.bar.getBoundingClientRect() : null;
+}
+
 /** 进度条事件坐标 → 电影总时间 */
-function progressEventToTime(e) {
+function progressEventToTime(e, rect) {
   if (!ui.bar || state.totalDuration <= 0) return 0;
-  const rect = ui.bar.getBoundingClientRect();
-  if (rect.width <= 0) return 0;
-  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const r = rect || barRect();
+  if (!r || r.width <= 0) return 0;
+  const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
   return isFinite(pct) ? pct * state.totalDuration : 0;
 }
 
 const MARKER_NEAR_PX = 12; // 悬停指针距最近分P标记 ≤12px 时浮现标记与分P信息（存在感时刻）
 
+/** 拖拽 pointerup 后抑制紧随 click 的窗口长度（毫秒）；判定逻辑见 cinema-utils.js */
+const CLICK_SUPPRESS_MS = 500;
+
 let dragStartIndex = null; // 拖拽起始分P下标（跨P判定用）
 
 /** 最近分P标记：返回 { index, distancePx, el } 或 null（无标记/进度条不可测时） */
-function nearestMarkerInfo(clientX) {
+function nearestMarkerInfo(clientX, rect) {
   if (!ui.bar || !ui.markers || ui.markers.children.length === 0) return null;
-  const rect = ui.bar.getBoundingClientRect();
-  if (rect.width <= 0) return null;
+  const r = rect || barRect();
+  if (!r || r.width <= 0) return null;
   let best = null;
   for (const m of ui.markers.children) {
     const pct = parseFloat(m.dataset.pct || '');
     if (!isFinite(pct)) continue;
-    const mx = rect.left + (pct / 100) * rect.width;
+    const mx = r.left + (pct / 100) * r.width;
     const dist = Math.abs(clientX - mx);
     if (!best || dist < best.distancePx) {
       best = { index: parseInt(m.dataset.index || '0', 10), distancePx: dist, el: m };
@@ -524,11 +540,11 @@ function nearestMarkerInfo(clientX) {
 }
 
 /** 刷新标记浮现状态：近边界 → markers-revealed + 最近标记高亮；远离 → 全部收回
- * nearInfo 可复用调用方已算好的 nearestMarkerInfo 结果（避免 mousemove 双遍历） */
-function updateMarkerReveal(clientX, nearInfo) {
+ * nearInfo/rect 可复用调用方已算好的结果（避免一次事件内重复遍历与重复测量） */
+function updateMarkerReveal(clientX, nearInfo, rect) {
   if (!ui.bar || !ui.markers) return;
   for (const m of ui.markers.children) m.classList.remove('nearest');
-  const near = nearInfo || nearestMarkerInfo(clientX);
+  const near = nearInfo || nearestMarkerInfo(clientX, rect);
   if (near && near.distancePx <= MARKER_NEAR_PX) {
     ui.bar.classList.add('markers-revealed');
     if (near.el) near.el.classList.add('nearest');
@@ -547,12 +563,13 @@ function clearMarkerReveal() {
 
 /** 悬停提示：按状态机输出时间基准与分P信息
  *  - 远离边界 hover / 单P内拖拽：P 内相对时间、无 pill（原生观感）
- *  - 近边界 hover / 跨P拖拽：电影总时间 + pill（跨P时为 accent 蓝「→ Pn · 标题」） */
-function showProgressTooltip(e, nearInfo) {
+ *  - 近边界 hover / 跨P拖拽：电影总时间 + pill（跨P时为 accent 蓝「→ Pn · 标题」）
+ * nearInfo/rect 由调用方透传（一次事件共享一次测量，见 barRect） */
+function showProgressTooltip(e, nearInfo, rect) {
   if (!ui.bar || !ui.tooltip || state.totalDuration <= 0) return;
-  const rect = ui.bar.getBoundingClientRect();
-  if (rect.width <= 0) return;
-  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const r = rect || barRect();
+  if (!r || r.width <= 0) return;
+  const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
   if (!isFinite(pct)) return;
   const t = pct * state.totalDuration;
   const info = overallToPartOffset(state.cumulative, Math.min(t, state.totalDuration - 0.01));
@@ -560,42 +577,55 @@ function showProgressTooltip(e, nearInfo) {
   // 存在感判定：拖拽态只认「跨P」（单P内拖拽无论是否靠近边界都保持 P 内相对时间 = 原生观感）；
   // 悬停态认「近边界 ≤12px」。两者都命中 → 电影总时间 + pill
   const crossing = state.seekDragging && dragStartIndex !== null && info && info.index !== dragStartIndex;
-  const near = nearInfo || nearestMarkerInfo(e.clientX);
+  const near = nearInfo || nearestMarkerInfo(e.clientX, r);
   const nearBoundary = !!(near && near.distancePx <= MARKER_NEAR_PX);
   const movieContext = crossing || (!state.seekDragging && nearBoundary);
 
-  updateMarkerReveal(e.clientX, near);
-
+  // tooltip 内容先在内存里拼好，只有真的变了才写 DOM 并回量宽度：
+  // 内容未变时完全不读布局（比每次 mousemove 都量更省），变了才付一次重排。
+  // 不能用「上一帧宽度」做钳制——pill 出现正是宽度剧变（约 3 倍）的时刻，
+  // 而此时又必然是近边界/跨P的悬停，用旧宽度会让 tooltip 溢出进度条端点。
   const textEl = ui.tooltip.querySelector('.cinema-tooltip-text');
+  let html = '';
   if (textEl && info && state.pages[info.index]) {
-    const part = state.pages[info.index];
-    const name = (part.part || '').trim();
-    const baseLabel = state.mode === 'season'
-      ? `第${info.index + 1}集${name ? ' · ' + name : ''}`
-      : `P${part.page}${name ? ' · ' + name : ''}`;
+    // 分P标签口径收敛到 cinema-utils.js 的 partDisplayLabel（约束 19/59 单一真源）：
+    // 输出与旧内联实现字节一致，故 _lastHtml 内容签名缓存与 v1.15 reflow 优化不受影响。
+    const baseLabel = partDisplayLabel(state.mode, info.index, state.pages[info.index]);
     const pill = movieContext
       ? (crossing
           ? `<span class="cinema-tooltip-part-pill cinema-tooltip-pill-cross">→ ${escapeHtml(baseLabel)}</span>`
           : `<span class="cinema-tooltip-part-pill">${escapeHtml(baseLabel)}</span>`)
       : '';
     const timeFormatted = formatTime(movieContext ? t : (info.offset || 0));
-    textEl.innerHTML = `
+    html = `
       <span class="cinema-tooltip-timecode">${timeFormatted}</span>
       ${pill}
     `;
   }
 
+  let half = ui.tooltip._half;
+  if (html && html !== ui.tooltip._lastHtml) {
+    ui.tooltip._lastHtml = html;
+    if (textEl) textEl.innerHTML = html;
+    half = ui.tooltip._half = ui.tooltip.offsetWidth / 2; // 本轮唯一一次读，仅在内容变化时发生
+  } else if (half == null) {
+    half = ui.tooltip._half = ui.tooltip.offsetWidth / 2; // 首次显示（或 tooltip 重建后）
+  }
+
+  updateMarkerReveal(e.clientX, near, r);
+
+  if (half == null) return;
   // 水平位置钳制在进度条范围内
-  const half = ui.tooltip.offsetWidth / 2;
-  const x = Math.max(half + 4, Math.min(pct * rect.width, rect.width - half - 4));
+  const x = Math.max(half + 4, Math.min(pct * r.width, r.width - half - 4));
   ui.tooltip.style.left = x + 'px';
   ui.tooltip.classList.add('visible');
 }
 
 function onProgressBarHoverMove(e) {
   if (state.seekDragging) return; // 拖拽中由 pointermove 负责
-  // 一次 mousemove 只算一次最近标记（tooltip 与 reveal 共用，避免双遍历）
-  showProgressTooltip(e, nearestMarkerInfo(e.clientX));
+  // 一次事件只测一次：rect 与最近标记由 tooltip 和标记浮现共用
+  const rect = barRect();
+  showProgressTooltip(e, nearestMarkerInfo(e.clientX, rect), rect);
 }
 
 function onProgressBarLeave() {
@@ -617,9 +647,9 @@ function onProgressBarPointerDown(e) {
 }
 
 /** 拖拽跨P：把 (min(起始P, 当前P), max] 区间内的边界标记标记为 cinema-crossing 高亮 */
-function updateCrossingMarkers(e) {
+function updateCrossingMarkers(e, rect) {
   if (!ui.bar || !ui.markers) return;
-  const t = progressEventToTime(e);
+  const t = progressEventToTime(e, rect);
   const info = overallToPartOffset(state.cumulative, Math.min(t, state.totalDuration - 0.01));
   const curIndex = info ? info.index : state.currentIndex;
   for (const m of ui.markers.children) m.classList.remove('cinema-crossing');
@@ -638,11 +668,13 @@ function updateCrossingMarkers(e) {
 
 function onProgressBarPointerMove(e) {
   if (!state.seekDragging) return;
-  showProgressTooltip(e, nearestMarkerInfo(e.clientX)); // 一次计算，tooltip 与 reveal 共用
+  // 一次 pointermove 只测一次 rect：标记距离、tooltip、跨P判定、fill 预览全部复用
+  const rect = barRect();
+  const t = progressEventToTime(e, rect);
+  showProgressTooltip(e, nearestMarkerInfo(e.clientX, rect), rect);
   // 跨P拖拽：高亮被越过的边界标记
-  updateCrossingMarkers(e);
+  updateCrossingMarkers(e, rect);
   // 预览：fill 实时跟随目标位置（松开后才真正 seek）
-  const t = progressEventToTime(e);
   const pct = state.totalDuration > 0 ? (t / state.totalDuration) * 100 : 0;
   if (ui.fill) ui.fill.style.width = Math.min(100, pct) + '%';
 }
@@ -655,7 +687,7 @@ function onProgressBarPointerUp(e) {
   clearMarkerReveal();
   try { ui.bar.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
   if (ui.tooltip) ui.tooltip.classList.remove('visible');
-  ui.bar._suppressClick = Date.now(); // 抑制随后的 click 事件（避免重复 seek）；时间戳 500ms 窗口，click 未触发时自动过期防误吞
+  ui.bar._suppressClick = Date.now(); // 抑制随后的 click 事件（避免重复 seek）；时间戳 + CLICK_SUPPRESS_MS 窗口，click 未触发时自动过期防误吞
   seekToClientX(e.clientX);
   updateUnifiedProgress();
 }
@@ -729,8 +761,8 @@ function onProgressBarKeyDown(e) {
 }
 
 function onProgressBarClick(e) {
-  // 拖拽/按下后的 click 已在 pointerup 处理，跳过（窗口 500ms，超窗自动失效）
-  if (ui.bar && ui.bar._suppressClick && Date.now() - ui.bar._suppressClick < 500) {
+  // 拖拽/按下后的 click 已在 pointerup 处理，跳过（窗口内有效，超窗自动失效）
+  if (ui.bar && isClickSuppressed(ui.bar._suppressClick, Date.now(), CLICK_SUPPRESS_MS)) {
     ui.bar._suppressClick = 0;
     return;
   }
@@ -819,7 +851,6 @@ function showSwitchRecovery(targetIndex) {
   });
   card.querySelector('[data-act="reload"]').addEventListener('click', () => {
     hideSwitchRecovery();
-    try { sessionStorage.setItem('cinemaDisplayMode', state.displayMode); } catch { /* ignore */ }
     location.reload();
   });
   card.querySelector('[data-act="close"]').addEventListener('click', () => {
@@ -922,6 +953,8 @@ function initSettingsPanelDrag(panel, handle) {
   let isDragging = false;
   let startX = 0, startY = 0;
   let origLeft = 0, origTop = 0;
+  let panelW = 0, panelH = 0;      // 面板尺寸（pointerdown 读一次，拖拽期间恒定）
+  let lastLeft = 0, lastTop = 0;   // 最近一次写入坐标（pointerup 持久化用，免再读布局）
 
   handle.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -932,6 +965,11 @@ function initSettingsPanelDrag(panel, handle) {
     const rect = panel.getBoundingClientRect();
     origLeft = rect.left;
     origTop = rect.top;
+    // 面板尺寸拖拽期间恒定：在此读一次，pointermove 内不再回读布局
+    panelW = rect.width;
+    panelH = rect.height;
+    lastLeft = origLeft;
+    lastTop = origTop;
     handle.classList.add('cinema-sp-dragging');
     try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     e.preventDefault();
@@ -941,12 +979,10 @@ function initSettingsPanelDrag(panel, handle) {
     if (!isDragging) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    const pw = panel.offsetWidth;
-    const ph = panel.offsetHeight;
-    const newLeft = Math.max(0, Math.min(origLeft + dx, window.innerWidth - pw));
-    const newTop = Math.max(0, Math.min(origTop + dy, window.innerHeight - ph));
-    panel.style.left = newLeft + 'px';
-    panel.style.top = newTop + 'px';
+    lastLeft = Math.max(0, Math.min(origLeft + dx, window.innerWidth - panelW));
+    lastTop = Math.max(0, Math.min(origTop + dy, window.innerHeight - panelH));
+    panel.style.left = lastLeft + 'px';
+    panel.style.top = lastTop + 'px';
   });
 
   const stop = (e, shouldSave) => {
@@ -954,10 +990,9 @@ function initSettingsPanelDrag(panel, handle) {
     isDragging = false;
     handle.classList.remove('cinema-sp-dragging');
     try { handle.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    // 拖拽结束持久化位置（下次打开面板仍在此处）
+    // 拖拽结束持久化位置（下次打开面板仍在此处）；直接用拖拽期已算出的坐标，免再读布局
     if (shouldSave) {
-      const rect = panel.getBoundingClientRect();
-      savePanelPos(Math.round(rect.left), Math.round(rect.top));
+      savePanelPos(Math.round(lastLeft), Math.round(lastTop));
     }
   };
   handle.addEventListener('pointerup', (e) => stop(e, true));
@@ -1087,9 +1122,6 @@ function applySettings() {
     updateUnifiedProgress();
   }
 
-  // 关灯遮罩
-  updateLightsOut();
-
   // 关闭自动关闭标签页时，收起可能已显示的提示气泡
   if (!settings.autoCloseTab) {
     closeCloseTabTip();
@@ -1097,6 +1129,9 @@ function applySettings() {
 
   // 设置可能来自外部路径（popup/跨标签）：面板控件与最新设置对齐
   syncSettingsPanelControls();
+
+  // B1(v1.18)：系统媒体卡片随「影院是否激活 + 是否多P」注册/撤下（幂等）
+  updateMediaSession();
 }
 
 // ============================================================
@@ -1139,22 +1174,13 @@ function onCinemaShortcutKey(e) {
 
   switch (action) {
     case 'nextPart':
-      if (state.isMultiPart && state.currentIndex < state.pages.length - 1 && typeof goToNextPart === 'function') {
-        goToNextPart();
-      }
+      cinemaNextPart();
       break;
     case 'prevPart':
-      if (state.isMultiPart && state.currentIndex > 0 && typeof jumpToPart === 'function') {
-        jumpToPart(state.currentIndex - 1, 0);
-      }
+      cinemaPrevPart();
       break;
     case 'toggleSettings':
       toggleSettingsPanel();
-      break;
-    case 'toggleLights':
-      settings.lightsOut = !settings.lightsOut;
-      saveSettings();
-      applySettings();
       break;
     case 'seekBack':
       seekShortcut(-10);
@@ -1187,81 +1213,97 @@ function teardownCinemaShortcuts() {
 }
 
 // ============================================================
-//  关灯模式（压暗播放器外区域 + 电影胶片暗角）
+//  切P入口（键盘 N/P 与系统媒体卡片「上/下一首」共用同一函数）
+//  不另写路径 —— 复用 advanceTarget 守卫的 goToNextPart 与手动 jumpToPart，
+//  使 MediaSession 成为「第三个切P入口」时不引入新的竞态类别。
 // ============================================================
 
-/** 关灯遮罩刷新节流：timeupdate 高频调用，实际只需 500ms 一次 */
-let lastLightsOutAt = 0;
-
-/** 检测当前是否处于大屏模式（网页全屏或原生全屏） */
-function isBigScreenDisplay() {
-  if (document.fullscreenElement || document.webkitFullscreenElement) return true;
-  const bp = document.querySelector('#bilibili-player, .bilibili-player, .bpx-player-container');
-  if (bp && (bp.classList.contains('mode-webscreen') || bp.classList.contains('bpx-player-mode-webscreen'))) return true;
-  const wrap = state.playerWrap || document.querySelector('.player-wrap');
-  if (wrap && (wrap.classList.contains('mode-webscreen') || wrap.classList.contains('bpx-player-mode-webscreen'))) return true;
-  const webBtn = document.querySelector('.bpx-player-ctrl-web');
-  if (webBtn && webBtn.classList.contains('bpx-state-entered')) return true;
-  return false;
+/** 下一P：与键盘 N 完全同一路径（goToNextPart 受 advanceTarget 守卫，末P早退） */
+function cinemaNextPart() {
+  if (state.isMultiPart && state.currentIndex < state.pages.length - 1 && typeof goToNextPart === 'function') {
+    goToNextPart();
+  }
 }
 
-/** 刷新关灯模式（压暗 + 暗角 + 纯净暗场水印淡化），由 settings.lightsOut 控制 */
-function updateLightsOut(force) {
-  const now = Date.now();
-  // 500ms 节流：高频 resize/scroll 等事件驱动调用时跳过；force === true（如全屏切换）强制立即刷新
-  if (force !== true && now - lastLightsOutAt < 500) return;
-  lastLightsOutAt = now;
-
-  const isBigScreen = isBigScreenDisplay();
-
-  // 隐藏与停用：仅移除关灯遮罩/暗角 class
-  const hideMask = () => {
-    if (ui.lightsOut) {
-      ui.lightsOut._pendingOn = false;
-      ui.lightsOut.classList.remove('on');
-    }
-    if (state.playerWrap) {
-      state.playerWrap.classList.remove('cinema-lights-out-active');
-    }
-    if (ui.vignette) {
-      ui.vignette.classList.remove('active');
-    }
-  };
-
-  const active = settings.enabled && settings.lightsOut && state.playerWrap && isBigScreen;
-  if (!active) { hideMask(); return; }
-
-  // 激活大屏暗场与胶片暗角
-  if (state.playerWrap) {
-    state.playerWrap.classList.add('cinema-lights-out-active');
+/** 上一P：与键盘 P 完全同一路径（手动 jumpToPart，offset=0） */
+function cinemaPrevPart() {
+  if (state.isMultiPart && state.currentIndex > 0 && typeof jumpToPart === 'function') {
+    jumpToPart(state.currentIndex - 1, 0);
   }
-  if (ui.vignette) {
-    ui.vignette.classList.add('active');
-  }
+}
 
-  // 首次创建遮罩（默认 opacity:0；同一帧插入后立即加 class 不会触发过渡，推迟一帧再亮起）
-  if (!ui.lightsOut) {
-    ui.lightsOut = document.createElement('div');
-    ui.lightsOut.id = 'cinema-lights-out';
-    document.body.appendChild(ui.lightsOut);
-  }
+// ============================================================
+//  系统媒体卡片（MediaSession）—— B1(v1.18)
+//
+//  纯装饰、纯本地：navigator.mediaSession 是 Web API，隔离世界可直接访问，
+//  无需像 player-bridge 那样注入 MAIN world。只修多P电影在系统卡片里的标题
+//  （B站按整片/单P标题显示、跨P不刷新），并把「上/下一首」接到上面与键盘共
+//  用的切P函数。
+//  §1.2 不覆盖 B站已有能力：B站已注册 play/pause/seekbackward/seekforward/
+//  seekto，本模块一律不碰；只补 B站未注册的 previoustrack/nexttrack（Chrome
+//  卡片里本就是置灰的上/下一首）。覆盖 metadata 时保留 B站已设的封面与艺术家。
+//  §1.1 零页面像素、§1.3 零设置键：不加 DOM、不加设置项、不加定时器、不写盘、
+//  不改 video.src。单P或总开关关闭时移除我们的处理器、不动 B站元数据。
+// ============================================================
 
-  const rect = state.playerWrap.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) { hideMask(); return; }
+/** 当前分P展示标签，与进度条 tooltip 共用 cinema-utils.js 的 partDisplayLabel（约束 19/59 单一口径）。
+ * 此处仅做「取哪个下标」的薄适配：显式传入 index 则用之，否则用 state.currentIndex。 */
+function mediaSessionPartLabel(index) {
+  const i = (typeof index === 'number') ? index : state.currentIndex;
+  return partDisplayLabel(state.mode, i, state.pages[i]);
+}
 
-  ui.lightsOut.style.left = rect.left + 'px';
-  ui.lightsOut.style.top = rect.top + 'px';
-  ui.lightsOut.style.width = rect.width + 'px';
-  ui.lightsOut.style.height = rect.height + 'px';
-  ui.lightsOut.style.setProperty('--cinema-lights-out-opacity', String(CINEMA_OPACITY));
-
-  // 已亮起或已有待执行的入场则无需重复调度
-  if (ui.lightsOut.classList.contains('on') || ui.lightsOut._pendingOn) return;
-  ui.lightsOut._pendingOn = true;
-  requestAnimationFrame(() => {
-    if (ui.lightsOut && ui.lightsOut._pendingOn) {
-      ui.lightsOut.classList.add('on');
-      ui.lightsOut._pendingOn = false;
+/** 保留 B站已注册封面（读不到再回退本片 pic），避免覆盖标题时夺走原生封面（§1.2） */
+function mediaSessionArtwork() {
+  try {
+    const existing = navigator.mediaSession && navigator.mediaSession.metadata;
+    if (existing && existing.artwork && existing.artwork.length) {
+      const out = [];
+      for (const a of existing.artwork) {
+        if (a && a.src) out.push({ src: a.src, sizes: a.sizes || '', type: a.type || '' });
+      }
+      if (out.length) return out;
     }
-  });
+  } catch (e) { /* 静默 */ }
+  return state.pic ? [{ src: state.pic }] : [];
+}
+
+/** 刷新系统媒体卡片（幂等）：多P电影才写标题/接上下一首；否则撤下我们的处理器、不动 B站元数据 */
+function updateMediaSession() {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  const ms = navigator.mediaSession;
+  if (!(settings.enabled && state.isMultiPart)) {
+    // 单P / 总开关关闭：撤掉我们加的切P入口，交还 B站（不覆盖其播放控制与元数据）
+    try {
+      ms.setActionHandler('previoustrack', null);
+      ms.setActionHandler('nexttrack', null);
+    } catch (e) { /* 静默 */ }
+    return;
+  }
+  try {
+    if (typeof MediaMetadata === 'function') {
+      const artist = (ms.metadata && ms.metadata.artist) || '';
+      ms.metadata = new MediaMetadata({
+        title: mediaSessionPartLabel(),
+        artist: artist,
+        album: state.title || '',
+        artwork: mediaSessionArtwork(),
+      });
+    }
+  } catch (e) { /* 静默 */ }
+  // 上/下一首 = 键盘 P/N 的同一函数（advanceTarget 守卫，不另写路径）；
+  // 到边界时置 null 让 Chrome 卡片对应按钮置灰（与守卫的“无处可去”一致）
+  try {
+    ms.setActionHandler('previoustrack', state.currentIndex > 0 ? () => cinemaPrevPart() : null);
+    ms.setActionHandler('nexttrack', state.currentIndex < state.pages.length - 1 ? () => cinemaNextPart() : null);
+  } catch (e) { /* 静默 */ }
+}
+
+/** 离开本页：移除我们注册的切P处理器，防残留句柄（B站元数据不动）；与 teardownCinemaShortcuts 同处调用 */
+function teardownMediaSession() {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  try {
+    navigator.mediaSession.setActionHandler('previoustrack', null);
+    navigator.mediaSession.setActionHandler('nexttrack', null);
+  } catch (e) { /* 静默 */ }
 }

@@ -10,13 +10,17 @@
 | 项目 | 说明 |
 |---|---|
 | 名称 | B站影院模式 - 分P无缝连播 |
-| 版本 | 1.12.0 |
+| 版本 | 1.18.0 |
 | 类型 | Chrome 扩展（Manifest V3） |
 | 匹配站点 | `*://www.bilibili.com/video/*` |
 | 权限 | `storage`（本地持久化）、`tabs`（关闭标签页） |
 | 构建方式 | 无构建步骤，纯静态 JS/CSS，直接加载目录即可 |
 | 测试 | `node --test tests/unit.test.js`（注意：传目录 `tests/` 在 Node v24.2.0 会报 MODULE_NOT_FOUND，必须显式指定文件路径） |
-| 文件组成 | `manifest.json`、`background.js`（153 行）、`cinema-utils.js`（纯函数库，浏览器/Node 双环境 UMD，353 行）、`cinema-core.js`（配置/状态/存储，754 行）、`cinema-player.js`（播放控制，~1960 行）、`cinema-ui.js`（界面，~1850 行）、`content.js`（引导，~470 行）、`player-bridge.js`（985 行，预取字节合成/P2P 屏蔽）、`content.css`（~1400 行）、`tests/unit.test.js`（34 用例） |
+| 文件组成 | `manifest.json`、`background.js`（153 行）、`cinema-utils.js`（纯函数库，浏览器/Node 双环境 UMD，353 行）、`cinema-core.js`（配置/状态/存储，754 行）、`cinema-player.js`（播放控制，~1980 行）、`cinema-ui.js`（界面，~1870 行）、`content.js`（引导，~470 行）、`player-bridge.js`（1000+ 行，预取字节合成/P2P 屏蔽）、`content.css`（~1400 行）、`tests/unit.test.js`（47 用例） |
+
+> **v1.17.0 说明**：① 预取热判定改为「仅主视频变体落盘才算热」（`writeByteStore` 增 `primary` 参数；`prefetchOkCid` 只看 `primary===true && kind==='video'`）——音频先到不再误判秒开；② 预取忙碌窗从「playurl 解析完」改为「`livePrefetchXhrs` 全落地」，同 cid 的 busy 应答不再清槽（避免下一 timeupdate 把同一集再拉一遍）；③ 关总开关真正停引擎：`onTimeUpdate`/`preloadNextPart`/`onVideoEnded` 均在 `!settings.enabled` 时早退，进度照记（重开能续）；④ 片尾防连跳一整P：`state.advanceTarget` 在 `goToNextPart`/`switchToPart` 入口挡住 ended 重入，落地/失败/整页跳转/`cleanup` 时清空；⑤ API 轮询照 `switchEpoch`，`cancelFadeOut` 取消未走完的淡出（SPA 复用 video 不再把下一页静音）；⑥ 继续观影带分 P：「继续观影」复用 `historyUrl(histItem)`；⑦ 观影记录加 `historyCache`：播放中不再每 5 秒全量拉 sync，仅其它设备写入时失效；⑧ 书签记电影时间：`toggleBookmarkEntry`/`bookmarkUrl` 增 `part`/`overallTime`，popup 显示「第 N 集」，恢复仅在打开对应分P时生效——旧书签无时间字段仍从片头开始；⑨ 单P观感修正：顶栏 `.bpx-player-top-wrap` 与互动弹幕 `.bpx-player-cmd-dm-wrap` 从 `cinema-active` 挪到 `cinema-bottom-progress`（cinema-active 挂的是 `settings.enabled` 单条件，单P也会拿到——v1.17 复核发现）；⑩ 片尾冻帧：多 P 最后一集播完时复用 `freezeFrame` 钉住谢幕画面，点击/按键任意手势经 wrap 捕获阶段 `armFreezeRelease` 放行（不 stopPropagation，原生推荐墙同一手势接管）；⑪ 显示模式跨会话：`prefs.displayMode` 新增（`savePlayerPrefs` 同管道），`switchToPart` 探测到当前模式写 prefs（`persistDisplayMode`，不记 fullscreen），页载时 `content.js` 从 prefs 读并恢复，删除原 `sessionStorage.cinemaDisplayMode` 一次性路径（修掉了失败重试/中途关页误恢复的边界问题）；⑫ `cinema-player.js:1128` 关总开关时改为完全不复原生结束 behavior（不 `suppressNativeAutoplay`、不 `maybeSuggestCloseTab`）——B站原生自动连播接管，符合「关开关=回到原生」的直觉。A-B 段循环缓做（受众/门禁不兼容 SPEC §1）。|
+
+> 注：v1.17 复核发现「`cinema-active` 挂 `settings.enabled` 单条件」是既有行为而非本批引入，本批仅把顶栏与互动弹幕选择器从该组挪到仅在接管进度条时生效的 `cinema-bottom-progress` 组。
 
 > **v1.1.0 说明**：原单文件 `content.js`（2789 行）已按职责拆分为 5 个模块文件（见 3.3）。
 > **v1.2.0 说明**：新增 `cinema-utils.js` 纯函数模块（`cinema-core` 等改为引用其中的 `formatTime`/`buildCumulative`/`overallToPartOffset`/`qualityTextToQn` 等）；新增单元测试（7/7 通过）；新增画面缩略图预览、跨标签页进度同步、播完提示操作、设置面板分组折叠、设置面板位置持久化。
@@ -67,7 +71,7 @@
 6. **下一分 P 预加载**：剩余 <60 秒且当前已播放 ≥15 秒时预取下一分P/下一集（合集模式跨 bvid 同样生效），字节级存入内存 `byteStore`，切换时播放器 Range 请求本地切片合成 206 秒开；悬停分P条目与切 P 落地后还会按需/链式预取
 7. **合集（UGC Season）支持**：跨 BV 号连播同一合集
 8. **播放完毕自动关闭标签页**：可配置（设置面板保留项），10 秒倒计时气泡
-9. **关灯模式**：压暗播放器外区域（`CINEMA_OPACITY=0.85` 固定，滑杆已删）；L 键运行时切换
+9. **水印净化**：影院激活（`cinema-active`）时隐藏播放器内水印与顶部干扰元素（关灯模式 v1.14 已整体删除：L 键/遮罩/暗角）
 10. **设置跨设备同步**：设置项存于 `chrome.storage.sync`（旧版本地数据自动迁移）
 11. **跨标签页进度同步**：同账号多标签页播放同一视频时，本地保存进度后若监听到其他标签页的新进度，且满足"时间超前 + 旧进度较新 + 距上次保存 >5 秒"则顺延，避免重复抢进度
 12. **播完无扩展界面**：整部电影播放完毕不显示任何扩展 UI（v1.11 删除结束卡与「放映结束」提示；仅按需压制 B站原生自动连播，可选的播完关标签页倒计时气泡不受影响）
@@ -83,7 +87,8 @@
 22. **切P音量淡入淡出**：切P前 P1 音量渐变到 0、P2 首帧就绪后渐回，声音平滑过渡（v1.7.0）
 23. **设置入口**：S 键 / 双击播放器区域 / popup「打开播放器设置」按钮（悬浮齿轮按钮 v1.12 已删）
 24. **底栏总时长接管**：原生底栏「总时长」显示为电影总时长，当前时间由 B站原生自走
-25. **全局快捷键（硬编码，v1.12 起不可配置）**：N/P 下一上一 P、S 设置、L 关灯、J/K ±10 秒（`SHORTCUT_DEFAULTS`）
+25. **全局快捷键（硬编码，v1.12 起不可配置）**：N/P 下一上一 P、S 设置、J/K ±10 秒（`SHORTCUT_DEFAULTS`；L 关灯键 v1.14 已随关灯模式删除）
+26. **系统媒体卡片（MediaSession，v1.18）**：多P电影在系统/浏览器媒体卡片里显示「当前分P标题 + 电影名（专辑）」并随切P刷新；卡片「上/下一首」接到与键盘 N/P 完全相同的切P函数。纯装饰、纯本地，单P或总开关关闭时不介入（保留 B站 原生卡片）
 
 ---
 
@@ -148,20 +153,20 @@ Manifest V3 的 content script 默认运行在 **ISOLATED world（隔离世界�
 
 ### 3.1 manifest.json
 
-扩展的声明入口：权限（`storage`、`tabs`）、Service Worker、两个 content script 的匹配规则与运行环境。
+扩展的声明入口：权限（`storage`、`tabs`）、Service Worker、两个 content script 的匹配规则与运行环境。另有两处非 manifest 声明的加载：`popup.html` 以 `<script>` 引入 `cinema-utils.js`（先于 `popup.js`），`background.js` 以 `importScripts('cinema-utils.js')` 引入——纯函数库因此被四个上下文共用（见约束 58）。
 
 | 字段 | 值 |
 |---|---|
 | `manifest_version` | 3 |
 | `permissions` | `["storage", "tabs"]` |
 | `background.service_worker` | `background.js` |
-| Content Script 1 | `player-bridge.js`，`document_start`，`MAIN` world |
+| Content Script 1 | `cinema-utils.js` → `player-bridge.js`，`document_start`，`MAIN` world |
 | Content Script 2 | `cinema-utils.js` → `cinema-core.js` → `cinema-player.js` → `cinema-ui.js` → `content.js` + `content.css`，`document_idle`，隔离世界（**按序注入，共享全局作用域**） |
 | 匹配 URL | `*://www.bilibili.com/video/*` |
 
-### 3.2 background.js（20 行）
+### 3.2 background.js（154 行）
 
-Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ type: 'closeTab' }` 消息，关闭发送者所在标签页（`chrome.tabs.remove(sender.tab.id)`），异步 `sendResponse({ ok: true })`。
+Service Worker，职责是 `chrome.runtime.onMessage` 的四类消息路由：`closeTab`（关闭发送者所在标签页，`chrome.tabs.remove(sender.tab.id)`）、`getPopupData`（为 popup 组装设置/观影记录/收藏/当前标签页）、`setEnabled`（popup 总开关写 `cinemaSettings.enabled`）、`toggleBookmark`（popup 侧收藏切换）。全部异步 `sendResponse`，故监听器一律 `return true`。详见 5.3。
 
 ### 3.3 内容脚本模块拆分（v1.1.0，原 content.js 2789 行 → 5 文件）
 
@@ -171,13 +176,13 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 
 | 文件 | 职责 | 主要内容 |
 |---|---|---|
-| `cinema-utils.js` | 纯函数库（浏览器/Node 双环境） | `formatTime`、`formatRelativeTime`、`escapeHtml`、`qualityTextToQn`（按分辨率优先匹配）、`buildCumulative`、`overallToPartOffset`、`parseSidx`、`buildSegmentPlan`、`parseRangeHeader`、`rangeCovered`（v1.5.0 预取规划） |
+| `cinema-utils.js` | 纯函数库（**四处上下文共用**：MAIN 世界、隔离世界内容脚本、popup 页、background SW） | 时间线 `buildCumulative`/`overallToPartOffset`/`overallFromPart`（电影内绝对位置逆运算）；格式化 `formatTime`/`formatRelativeTime`/`formatDurationCN`（中文可读时长，v1.16）/`escapeHtml`；`qualityTextToQn`（按分辨率优先匹配）；预取 `parseSidx`/`buildSegmentPlan`/`parseRangeHeader`/`rangeCovered`；合集模型 `buildSeasonModel`/`buildSectionProgressKey`；收藏 `sanitizeBookmarkList`/`toggleBookmarkEntry`（v1.16 单一来源，容量 `BOOKMARK_CAP` 只在本文件内）；UI 判定 `isClickSuppressed`（v1.15 从内联抽出） |
 | `cinema-core.js` | 配置 / 状态 / 工具 / 全部持久化 | `DEFAULT_SETTINGS`、`state`、工具函数、设置（`sync`）、进度、观影记录（含容量上限）、播放偏好的读写、跨标签页进度同步（`onProgressStorageChanged`）、P2P 屏蔽设置（`p2pBlock`）与 `syncBridgeConfig` 下发 `p2pBlock` |
 | `cinema-player.js` | 播放控制 | 数据获取三级策略、视频元素查找、显示模式保持、播放设置记忆、预加载（自动 + 悬停按需 `prefetchPartOnDemand` + 切P链式）、自动关闭标签页、视频事件处理、分P切换（含切P冻结帧集成 `freezeFrame`/`unfreezeFrame` + 音量淡入淡出 `fadeOutVolume`/`fadeInVolume`）、进度恢复 |
-| `cinema-ui.js` | 界面 | 统一进度条（原生观感校准 + 存在感时刻状态机：悬停提示/拖拽seek/缓冲显示/分P标记浮现）、冻结帧遮罩（`freezeFrame`/`unfreezeFrame`）、设置面板（v1.12 起单卡片：两个开关+收藏+入口提示，标题栏拖动与位置记忆）、状态徽章（纯 error toast）、关灯模式、悬停按需预取（`setupPrefetchUI`/`setupHoverPrefetch`）、键盘 seek（`onProgressBarKeyDown`/`seekToOverallTime`）、全局快捷键（`SHORTCUT_DEFAULTS`） |
+| `cinema-ui.js` | 界面 | 统一进度条（原生观感校准 + 存在感时刻状态机：悬停提示/拖拽seek/缓冲显示/分P标记浮现）、冻结帧遮罩（`freezeFrame`/`unfreezeFrame`）、设置面板（v1.12 起单卡片：两个开关+收藏+入口提示，标题栏拖动与位置记忆）、状态徽章（纯 error toast）、悬停按需预取（`setupPrefetchUI`/`setupHoverPrefetch`）、键盘 seek（`onProgressBarKeyDown`/`seekToOverallTime`）、全局快捷键（`SHORTCUT_DEFAULTS`）（关灯模式 v1.14 已删） |
 | `content.js` | 引导 | SPA 导航监听、播放器容器变化监听（收窄范围）、`init → proceed → onVideoFound` 流水线、`cleanup` 全量重置、注册跨标签页进度同步监听、popup 消息（`cinema-open-settings`）、启动 |
 
-### 3.4 player-bridge.js（863 行）
+### 3.4 player-bridge.js（975 行）
 
 运行于页面主世界，仅做"content.js 无法直接做的事"。依赖 `cinema-utils.js`（v1.4.0 起同样注入 MAIN world 且在前，IIFE 启动时闭包捕获 `uMatchStreamUrls`/`uExtractStreamCode`/`uIsAudioStreamFilename`/`uParseSidx`/`uBuildSegmentPlan`/`uParseRangeHeader`/`uRangeCovered` 引用，防页面脚本覆盖全局名）：
 
@@ -203,8 +208,8 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | 设置面板（单卡片，v1.12） | 280px 宽、标题栏可拖动、两个开关（enabled/autoCloseTab）+ 收藏按钮 + 入口提示；无分组折叠/无 select/无快捷键编辑器/无数据组 |
 | 播放器容器定位 | `position: relative`（不加 `!important`，避免覆盖 B 站网页全屏的 fixed 规则） |
 | 状态徽章 | 右下角固定、纯 error toast（v1.12 起 info/success 类与 CSS 已删）；错误信息闪现约 5 秒后自动淡出 |
-| 设计令牌 | `:root` 定义 `--c-radius-pill`、`--c-shadow-pop`、`--c-font-sans/mono` 与主题色令牌（v1.6.0；v3 清理未使用令牌） |
-| 面板动效 | 设置面板 `.visible` 用 `opacity/transform/visibility` 过渡（.18s，无 JS 改动）；关灯遮罩 `.on` 切换 opacity .5s（v1.6.0） |
+| 设计令牌 | `:root` 定义 `--c-shadow-pop`、`--c-font-sans/mono` 与主题色令牌（v1.6.0；v3 与 v1.15 两轮清理未使用令牌，现仅保留有引用者） |
+| 面板动效 | 设置面板 `.visible` 用 `opacity/transform/visibility` 过渡（.18s，无 JS 改动）（关灯遮罩 `.on` 切换 v1.14 已随关灯删除） |
 | 关闭标签页提示气泡 | 右下角 10 秒倒计时气泡 |
 
 ---
@@ -219,7 +224,6 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 |---|---|---|
 | `enabled` | `true` | 总开关 |
 | `autoCloseTab` | `false` | 播放完毕自动关闭标签页 |
-| `lightsOut` | `false` | 关灯模式——压暗播放器外区域（运行时由 L 键切换） |
 
 **内化常量**（`FORCED_SETTINGS` 面板不再暴露、存储旧值被 `applyLoadedSettings` 末尾覆写）：
 
@@ -231,9 +235,8 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | `FORCED_SETTINGS.preloadNext` | `true` | 无形的速度 |
 | `FORCED_SETTINGS.fastSwitch` | `true` | 无形的速度 |
 | `FORCED_SETTINGS.progressSync` | `true` | 隐形便利 |
-| `SHORTCUT_DEFAULTS` | `{ nextPart:'KeyN', prevPart:'KeyP', toggleSettings:'KeyS', toggleLights:'KeyL', seekBack:'KeyJ', seekForward:'KeyK' }` | 默认键位避开 B 站原生冲突，快捷键编辑器已删 |
-| `CINEMA_OPACITY` | `0.85` | 关灯压暗（原 lightsOutOpacity 滑杆删除） |
-| `CINEMA_P2P_TEMP_MS` | `4000` | 切P窗口临时 P2P 屏蔽时长（原 p2pTempMs） |
+| `SHORTCUT_DEFAULTS` | `{ nextPart:'KeyN', prevPart:'KeyP', toggleSettings:'KeyS', seekBack:'KeyJ', seekForward:'KeyK' }` | 默认键位避开 B 站原生冲突，快捷键编辑器已删（`toggleLights:'KeyL'` v1.14 已随关灯删除） |
+| `CINEMA_P2P_TEMP_MS` | `4000` | 切P窗口临时 P2P 屏蔽时长（原 p2pTempMs；`CINEMA_OPACITY` 已随关灯删除） |
 
 **v1.12 已删除的键**：`autoPlayNext`/`hidePartUI`/`seamlessMovie`/`seasonMovie`/`showSettingsBtn`/`showStatusBadge`/`preloadNext`/`fastSwitch`/`p2pBlock`/`p2pTempMs`/`progressStyle`/`lightsOutOpacity`/`theme`/`progressSync`/`shortcuts`（其中 7 个布尔键转入 `FORCED_SETTINGS`，`theme` 转为永远跟随系统，`progressStyle` 固定 classic，`lightsOutOpacity`/`p2pTempMs` 转常量）。
 
@@ -243,7 +246,6 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 |---|---|---|
 | `bvid` | string | 视频 BV 号 |
 | `cid` | number | 当前分 P CID |
-| `aid` | number | 视频 AID |
 | `title` | string | 视频标题 |
 | `pages` | array | 分 P 列表：`[{ page, cid, part, duration, vid, weblink }]` |
 | `currentIndex` | number | 当前分 P 索引（0-based） |
@@ -259,7 +261,6 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | `observerTop` | MutationObserver | body 直接子节点观察器（捕获播放器容器整体重建） |
 | `mode` | string | `'pages'`（分P模式） / `'season'`（合集模式） |
 | `seasonId` | number | UGC Season ID |
-| `seasonTitle` | string | 合集名称 |
 | `seasonEpisodes` | array | 合集剧集列表：`[{ index, bvid, cid, title, duration, id }]` |
 | `displayMode` | string | `'normal'` / `'wide'` / `'web-fullscreen'` / `'fullscreen'` |
 | `pic` | string | 视频封面图 URL |
@@ -289,13 +290,13 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | `buffered` | 缓冲进度层 `#cinema-progress-buffered` |
 | `markers` | 分 P 分隔标记层 `#cinema-progress-markers` |
 | `tooltip` | 悬停预览气泡 `#cinema-progress-tooltip` |
-| `timeLabel` | 总时间标签 `#cinema-time-label` |
-| `partLabel` | 分 P 指示器 `#cinema-part-label` |
+| `bottomTimeCache` | 底栏总时长节点缓存 `{ node, isContainerFallback }`（动态挂载，未在字面量声明）；`updateBottomTimeDisplay` 命中即免重复 querySelector，`node.isConnected` 为假时自动失效重查（播放器重建场景） |
+| `hoverHandlers` | hover 预取的 `{ over, out }` 监听句柄（动态挂载）；供 `teardownHoverPrefetch()` 移除，防 SPA 导航后监听器累积 |
 | `settingsPanel` | 设置面板 `#cinema-settings-panel`（v1.12 起单卡片，无设置按钮） |
 | `statusBadge` | 状态徽章 `#cinema-status-badge`（v1.12 起纯 error toast） |
 | `closeTip` | 自动关闭提示气泡 `.cinema-close-tip` |
-| `lightsOut` | 关灯模式遮罩 `#cinema-lights-out`（v1.6.0 起常驻元素，`.on` class 切换） |
-| `vignette` | 电影胶片暗角遮罩 `#cinema-vignette`（`.active` class 切换） |
+| `lightsOut` | **已删**：关灯遮罩（v1.14 随关灯模式整体删除） |
+| `vignette` | **已删**：胶片暗角遮罩（v1.14 删，只被关灯激活） |
 | `freezeCanvas` | 冻结帧 canvas 元素 `#cinema-freeze-frame`（v1.7.0） |
 | 标记 `data-index`/`data-pct` | 分P标记元素上的边界下标与水平百分比（v1.12，`nearestMarkerInfo` 最近标记距离计算用）；`--hover-pct` ghost 变量已随 v1.12 删除 |
 
@@ -303,6 +304,38 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 
 ## 5. 关键函数说明
 
+> ⚠️ **关于「行号」列**：下表中的 `L####` 引用的是 **v1.1.0 模块拆分之前的单体 `content.js`（2789 行）**，与当前 5 文件布局（cinema-utils / core / player / ui / content）无对应关系，**已停止维护**——例如 `applySettings` 标注 L2395、`init` 标注 L2604，而当前最长的 cinema-player.js 也只有约 1925 行。定位函数请用编辑器搜索函数名，不要依赖这些数字。本轮起新增条目一律填 `-`。
+>
+> v1.18.0 新增的关键函数（系统媒体卡片 + 分P标签合一）：
+>
+> | 函数 | 文件 | 说明 |
+> |---|---|---|
+> | `partDisplayLabel(mode, index, part)` | utils | **新增纯函数**：分P展示标签的单一真源——season→`第{index+1}集 · 名`、pages→`P{part.page} · 名`，无名不带 ` · `，空 `part` 返回空串。`showProgressTooltip`（进度条气泡）与 `mediaSessionPartLabel`（系统媒体卡片标题）共用它，消除两处内联格式漂移（约束 19/58/59） |
+> | `mediaSessionPartLabel(index?)` | ui | 薄适配层：取 `index`（省略则 `state.currentIndex`）后转调 `partDisplayLabel`，不再自持标签格式（v1.18） |
+>
+> v1.16.0 新增/重构的关键函数（数据激活与体验打磨）：
+>
+> | 函数 | 文件 | 说明 |
+> |---|---|---|
+> | `formatDurationCN(seconds)` | utils | **新增纯函数**：秒 → 中文可读时长（`1 分钟内`/`59 分钟`/`1 小时 12 分`）；非法或 <=0 返回空串，由调用方隐藏整段文案。用于 popup 展示 `watched`（此前一直采集、无 UI 读取） |
+> | `sanitizeBookmarkList(list, cap?)` / `toggleBookmarkEntry(list, meta, cap?, now?)` | utils | **新增纯函数**：收藏消毒去重截断 / 切换语义，成为 content 与 background 的**单一来源**；容量 `BOOKMARK_CAP=50` 只存在于本文件内且刻意不导出（防撞全局词法名） |
+> | `pollUntil({probe, onTimeout, maxAttempts?, intervalMs?})` | player | **新增**：切P落地轮询骨架（`switchEpoch` 代际作废 + attempts 计数 + 超时交调用方决定返回值）。`waitForVideoChange` 与 `waitForVideoChangeSeason` 由两份同构实现改为其上的 probe/onTimeout |
+> | `buildListRow(item, sub, onOpen, onRemove?)` | popup | **新增**：「最近放映」与「收藏」两处同构行构建合一；popup 另删除本地第三份 `escapeHtml`/`mm:ss` 实现改用 utils（顺带修掉超 1 小时仍输出 `65:00` 的既有缺陷） |
+>
+> v1.15.0 重构的关键函数（隐形提速，无可见变化）：
+>
+> | 函数 | 文件 | 说明 |
+> |---|---|---|
+> | `barRect()` | ui | **新增**：返回 `ui.bar` 的 DOMRect。事件处理器应在**最开头**调用一次并向下透传，避免一次事件内多次 `getBoundingClientRect` 与样式写入交错（强制同步重排） |
+> | `progressEventToTime(e, rect?)` / `nearestMarkerInfo(clientX, rect?)` / `updateMarkerReveal(clientX, nearInfo?, rect?)` / `showProgressTooltip(e, nearInfo?, rect?)` / `updateCrossingMarkers(e, rect?)` | ui | 均新增可选 `rect` 参数供透传；省略时回退自读，故点击/键盘等单事件路径无需改动调用点 |
+> | `onProgressBarPointerMove` / `onProgressBarHoverMove` | ui | 由「一次事件 4 次 rect 读取」降为 1 次；pointermove 同时复用已算出的目标时间 `t`，不再二次换算 |
+> | `showProgressTooltip` | ui | tooltip 半宽改为**按内容签名缓存**（`ui.tooltip._lastHtml` / `_half`，挂在元素自身，重建后自动重量）：内容与上次相同则本轮完全不读布局，不同才写 `innerHTML` 并回量一次。比"每次 mousemove 都量"更省，且避免了"用上一帧宽度钳制"在 pill 出现（宽度剧变）+ 近端点悬停时让 tooltip 溢出的错误 |
+> | `initSettingsPanelDrag` | ui | 面板尺寸改在 `pointerdown` 与 rect 一并读一次（拖拽期间恒定），`pointermove` 不再回读布局；`pointerup` 持久化复用拖拽期已算出的 `lastLeft/lastTop` |
+> | `updateUnifiedProgress(bufEndCached?)` | ui | 新增可选参数：调用方本轮已扫过 `video.buffered` 就透传，避免与 `currentBufferedEnd()` 重复遍历；`aria-valuenow/valuemax` 改为整秒变化才写 |
+> | `cinemaXHR.open` / `xhr.setRequestHeader` | bridge | 8 次属性 `delete` 改为按 `_cinemaSynthetic` 标记门控（只有合成过响应才需清理影子属性）；`setRequestHeader` 的 `toLowerCase()` 改为仅字节候选请求执行 |
+> | `isClickSuppressed(stamp, now, windowMs?)` | utils | **新增纯函数**：拖拽 pointerup 后的 click 抑制窗口判定，从 `onProgressBarClick` 内联式抽出；窗口长度统一为 `CLICK_SUPPRESS_MS` 常量（原 500 散落在两处）。右边界为严格小于，并固化「时钟回拨判为抑制」的既有语义 |
+> | `overallFromPart(cumulative, part, time)` | utils | **新增纯函数**：`overallToPartOffset` 的逆运算（P 内时间 → 电影内绝对位置），从 `updateWatchHistory` 内联处抽出，`overallTime` 字段与 3 个新单测共用 |
+>
 > v1.7.2 新增/重构的关键函数：
 >
 > | 函数 | 文件 | 说明 |
@@ -334,8 +367,8 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 > | 章节分段着色渐变 | ui | cumulative 百分比区间交替色相（**v2.0 已随章节样式整模块删除**） |
 > | `showTransition` 幕间分支 | ui | 原「第 N 幕」四行幕间结构（**R2 已删**，分P切换不再插幕间卡）；剩余单行模式亦已随 v1.11 整体删除 |
 > | `showFinishedActions` End Card | ui | **v1.11 已随结束卡整体删除**（原含 title/sub/divider 装饰 v2.0 已删，后仅「重新放映 / 关闭」两键 + 30s 自动收起） |
-> | `onCinemaPlay` / `onCinemaPause` | player | 原切 `.cinema-paused` class（**v2.0 已删除**——样式随被砍主题一并移除）；现仅刷新关灯遮罩 |
-> | `updateLightsOut` | ui | `display` 硬切全部改 `.on` class 切换（opacity .5s 过渡）；500ms 节流 + rAF + `_pendingOn` 首帧延迟保证淡入 |
+> | `onCinemaPlay` / `onCinemaPause` | player | 原切 `.cinema-paused` class（**v2.0 已删除**）；后仅刷新关灯遮罩，**v1.14 已随关灯整体删除**（含 play/pause 监听绑定） |
+> | `updateLightsOut` | ui | 关灯遮罩刷新（500ms 节流 + rAF + `_pendingOn` 首帧延迟）；**v1.14 已随关灯整体删除** |
 > | 设置面板动效 | ui/css | 面板出入场动效（设置面板零 JS 改动——原本就只切 class）；历史面板 v2.0 已删除 |
 >
 > v1.5.0 新增/重构的关键函数：
@@ -400,7 +433,7 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 > | `seekToClientX` | ui | 按进度条坐标跳转（点击与拖拽共用） |
 > | `exportHistory` / `clearAllHistory` | ui | 观影记录导出 JSON / 清空（二次确认）——**v2.0 已随观影记录面板整模块删除**（存储层 `readAllHistory`/`writeAllHistory` 保留，popup 与备份导入导出仍用） |
 > | `bindIntroOutroInputs` / `refreshIntroOutroInputs` | ui | 设置面板"当前视频"片头/片尾输入绑定与刷新（**R2 已删除**） |
-> | `updateLightsOut` | ui | 关灯遮罩位置/显隐刷新（跟随播放器，原生全屏自动隐藏） |
+> | `updateLightsOut` | ui | 关灯遮罩位置/显隐刷新（跟随播放器，原生全屏自动隐藏）；**v1.14 已随关灯整体删除** |
 
 ### 5.1 内容脚本模块（原 content.js）
 
@@ -427,7 +460,7 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | 函数 | 行号 | 签名 | 说明 |
 |---|---|---|---|
 | `saveProgress` | L143 | `() => void` | 保存当前进度（合集用 `season_${id}` 为 key，分 P 用 bvid），同步调用 `updateWatchHistory` |
-| `updateWatchHistory` | L168 | `(progressKey: string, data: object) => void` | 更新观影记录（含累计观看秒数并入） |
+| `updateWatchHistory` | L168 | `(progressKey: string, data: object) => void` | 更新观影记录（含累计观看秒数并入）。写入 `overallTime = overallFromPart(state.cumulative, data.part, data.time)`（纯函数逆运算，v1.15 抽出后可单测），即**电影内绝对位置**——`data.time` 是 P 内 `video.currentTime` 而 `totalDuration` 是整部电影总长，口径不同不可直接相除，popup 的总进度百分比依赖该字段 |
 | `loadProgress` | L191 | `(bvid: string) => Promise<object\|null>` | 加载指定视频的上次播放进度 |
 
 #### 数据获取
@@ -456,22 +489,22 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | `getPlayerDisplayMode` | L611 | `() => Promise<'normal'\|'wide'\|'web-fullscreen'\|'fullscreen'>` | 优先检测原生全屏 → 桥接查询 `mainScreen` → DOM 类名回退 |
 | `queryPlayerMainScreen` | L588 | `() => Promise<number>` | 通过 `__cinema_get_mode__` 事件查询（400ms 超时） |
 | `parseBridgeDetail` | L579 | `(e: Event) => object` | 兼容 JSON 字符串与对象的 detail 解析 |
-| `switchPartViaPlayerAPI` | L637 | `(targetPage: number) => Promise<boolean>` | 通过 `__cinema_switch_part__` 调播放器内部 API 切 P（600ms 超时），**优先路径** |
+| `switchPartViaPlayerAPI` | L637 | `(targetPage: number) => Promise<boolean>` | 通过 `__cinema_switch_part__` 调播放器内部 API 切 P（600ms 超时），**优先路径**。超时不等于失败：先探测 `getCurrentPage()` 是否已到目标P，命中则 `resolve(true)` 交 `waitForPlayerAPISwitch` 收敛，防结果事件晚到时走点击兜底造成**双切** |
 | `restoreDisplayMode` | L665 | `(mode: string) => void` | 点击对应控件按钮恢复模式；检查 `bpx-state-entered` 类避免重复点击导致退出；按钮未渲染则 200ms 重试最多 10 次 |
 
 #### 播放设置记忆
 
 | 函数 | 行号 | 签名 | 说明 |
 |---|---|---|---|
-| `loadPlayerPrefs` | L708 | `() => Promise<void>` | 从 `chrome.storage.local.cinemaPrefs` 加载偏好 |
+| `loadPlayerPrefs` | L708 | `() => Promise<void>` | 从 `chrome.storage.local.cinemaPrefs` 加载偏好；**存量清洗**：读到 `volume === 0` 视为旧版污染（旧逻辑把 muted 折算为 0 落盘），重置为 1 并立即 `savePlayerPrefs()` 回写 |
 | `savePlayerPrefs` | L725 | `() => void` | 将 `state.prefs` 写入存储 |
 | `findDanmakuBtn` | L732 | `() => HTMLElement\|null` | 查找弹幕开关按钮（登录后才有） |
 | `onPlayerRateChange` | L743 | `() => void` | 用户调整倍速时记录（含保护期检查） |
-| `onPlayerVolumeChange` | L756 | `() => void` | 用户调整音量时记录 |
+| `onPlayerVolumeChange` | L756 | `() => void` | 用户调整音量时记录（含保护期检查）。**`video.muted` 时直接 return 不记录**——B站自身静音（广告/初始化/清晰度切换）不得被折算为 `volume=0` 落盘，否则此后每次加载都被强制静音 |
 | `captureQualityText` | L768 | `() => void` | 节流捕获当前画质文本 |
 | `captureDanmakuState` | L780 | `() => void` | 节流捕获弹幕开关状态 |
 | `restoreQualityByText` | L792 | `(qText: string) => void` | 通过画质菜单恢复画质（点击→匹配文本项→800ms 延迟） |
-| `restorePlayerPrefs` | L819 | `() => Promise<void>` | 恢复倍速/音量/画质/弹幕（3 秒保护期，1.5 秒完成） |
+| `restorePlayerPrefs` | L819 | `() => Promise<void>` | 恢复倍速/音量/画质/弹幕（3 秒保护期，1.5 秒完成）；音量段要求 `prefs.volume > 0`（0 视为旧版污染，跳过恢复防静音复发），且 `state.fadeSnapshot` 存在时整段跳过（淡入期间由 `armAudioFadeIn` 接管） |
 
 #### 下一分P预加载
 
@@ -495,24 +528,26 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 
 | 函数 | 行号 | 签名 | 触发 | 职责 |
 |---|---|---|---|---|
-| `attachVideoListeners` | L1001 | `() => void` | - | 绑定 `loadedmetadata`/`ended`/`timeupdate`/`ratechange`/`volumechange`/`play`/`pause`/全屏事件 |
-| `detachVideoListeners` | L1021 | `() => void` | - | 解绑所有视频事件监听（含 `play`/`pause` 动画冻结监听） |
+| `attachVideoListeners` | L1001 | `() => void` | - | 绑定 `loadedmetadata`/`ended`/`timeupdate`/`ratechange`/`volumechange`/`progress`/全屏事件（`play`/`pause` 绑定 v1.14 已随关灯删除） |
+| `detachVideoListeners` | L1021 | `() => void` | - | 解绑所有视频事件监听 |
 | `onVideoReady` | L1070 | `() => void` | `loadedmetadata` | 更新当前 P 实际时长、重算累计、刷新指示器 |
 | `onTimeUpdate` | L1086 | `() => void` | `timeupdate`（高频） | 观影统计（seek >5s 不计）、预取触发（剩余<60s）、节流捕获画质/弹幕（每 4 次）、更新进度条、每 5 秒存进度；`state.restoringProgress` 时 early return（v1.7.1） |
 | `onVideoEnded` | L1147 | `() => void` | `ended` | 自动切下一 P；最后一P播完仅压制原生自动连播 + 可选关标签页提示（播完无扩展界面，v1.11） |
-| `onFullscreenChange` | L1036 | `() => void` | `fullscreenchange` | 进入原生全屏时隐藏设置按钮、收起设置面板；退出时 `ensureSettingsPanelHost(false)` 归还面板到 body 后 `applySettings()` 恢复可见性；刷新关灯遮罩；切 P 期间保持全屏 |
+| `onFullscreenChange` | L1036 | `() => void` | `fullscreenchange` | 进入原生全屏时隐藏设置按钮、收起设置面板；退出时 `ensureSettingsPanelHost(false)` 归还面板到 body 后 `applySettings()` 恢复可见性；切 P 期间保持全屏（原「刷新关灯遮罩」v1.14 已随关灯删除） |
 
 #### 分 P 切换
 
 | 函数 | 行号 | 签名 | 说明 |
 |---|---|---|---|
-| `goToNextPart` | L1293 | `() => Promise<void>` | 自动切下一 P 的总入口（记录显示模式、暂停视频防竞态、三级切换策略）；切P时 `freezeFrame()`+`fadeOutVolume()`（`useSeamlessCover` 决定淡出时长）、`holdTransitionUntilFrame` 后 `unfreezeFrame()`+`fadeInVolume()`；落地后 `setTimeout 800ms → preloadNextPart()` 链式预取（连续观影不必等剩余 60 秒窗口） |
+| `switchToPart` | - | `(targetIndex: number, offsetSeconds?: number) => Promise<void>` | **分P切换唯一实现**（`goToNextPart`/`jumpToPart` 共用，此前是两份约 100 行的近似实现）。流程：`switching` 锁 + `targetIndex` 越界检查 + 同P仅 seek 早退 → 收起残留恢复卡 → `cancelPrefetch({keepCid})` → `applyTempP2PBlock` → `freezeFrame` → 暂停 → 淡出（`useSeamlessCover() && prefetchHot` 时跳过）→ 记录 displayMode → `saveProgress` → 三级切换（season 走 `tryClickSeasonEpisode`/pages 走 API→点击→整页跳转）→ 失败则揭帧 + 恢复卡 + `armSwitchRecoveryWatch` → 成功则 `restoreDisplayMode` → `armAudioFadeIn` → 分叉（`offsetSeconds` 非空：seek + `tryAutoPlay`；否则 `restorePlayerPrefs`）→ `syncBridgeConfig` → `holdTransitionUntilFrame` → `unfreezeFrame` → 重置预取状态 → `prewarmDanmaku` → 800ms 链式预取 |
+| `goToNextPart` | - | `() => Promise<void>` | 薄包装：`switchToPart(state.currentIndex + 1, null)`（末P早退）。调用方全部 fire-and-forget，无 `await` |
+| `jumpToPart` | - | `(targetIndex: number, offsetSeconds: number) => Promise<void>` | 薄包装：`switchToPart(targetIndex, offsetSeconds)`（进度条点击/拖拽、跨P跳转触发）。合并后该路径额外获得越界检查与「无缝预取命中时跳过淡出」优化 |
 | `fadeOutVolume` | L1396 | `(video: HTMLVideoElement, ms: number) => void` | 音量 10 步渐变到 0，结束后置 `muted=true` 并恢复 volume 原值（muted 状态不发声，淡入时 unmute）（v1.7.0） |
-| `fadeInVolume` | L1414 | `(video: HTMLVideoElement, ms: number) => void` | `muted=false` 后 10 步从 0 渐回原值（P2 首帧就绪后调用）（v1.7.0） |
-| `jumpToPart` | L2129 | `(targetIndex: number, offsetSeconds: number) => Promise<void>` | 跳转到指定分 P 的指定时间点（进度条点击触发）；同 `goToNextPart`：切P时 `freezeFrame()`+`fadeOutVolume()`、`holdTransitionUntilFrame` 后 `unfreezeFrame()`+`fadeInVolume()` + 落地后 800ms 链式预取 |
-| `tryClickNextPart` | L1362 | `(targetIndex: number) => boolean` | 尝试通过点击 DOM 切 P（优先用 `data-key=cid` 精确匹配，多套新旧版选择器回退） |
+| `fadeInVolume` | L1414 | `(video: HTMLVideoElement, ms: number) => void` | `muted=false` 后 10 步从 0 渐回原值（P2 首帧就绪后调用）；同时置 `prefsGuardUntil = now + 2000`，防淡入首步的 volume=0 被 `onPlayerVolumeChange` 误记为用户偏好 |
+| `findOwnEpisodeScope` | - | `() => Element\|null` | 定位**本视频**的选集容器：遍历 `state.pages` 已知 cid，用 `.video-pod__item[data-key="<cid>"]` 反查并 `closest('.video-pod, .video-section-block, .video-sections, .multi-page')`（退化取 `parentElement`）。目标 cid 因列表分页/虚拟化未渲染时，其他 cid 仍可能命中。返回 null 时调用方跳过 pod 兜底 |
+| `tryClickNextPart` | L1362 | `(targetIndex: number) => boolean` | 点击 DOM 切 P。优先级：`data-key=cid` 精确匹配 → 全局选择器梯度（`bpx-player-ep-item` / `list-box` / `multi-page` / bvid 限定的 `a[href*=p=N]`）→ **作用域内** `.video-pod__item:nth-child(N)`（经 `findOwnEpisodeScope`）→ 全链接扫描（bvid + p 双限定） |
 | `tryClickSeasonEpisode` | L1482 | `(targetIndex: number) => boolean` | 合集模式：通过 bvid 或选集面板选择器点击 |
-| `waitForPlayerAPISwitch` | L1418 | `(expectedIndex: number) => Promise<void>` | 播放器内部 API 切换后等待就绪（loadedmetadata + 时长匹配 + URL p 参数 + 80×150ms 轮询） |
+| `waitForPlayerAPISwitch` | L1418 | `(expectedIndex: number) => Promise<boolean>` | 播放器内部 API 切换后等待就绪（loadedmetadata + 时长匹配 + URL p 参数综合判断，轮询兜底）；返回 false 表示超时且从未确认 |
 | `waitForVideoChange` | L1521 | `(expectedIndex: number) => Promise<void>` | DOM 点击切换后等待就绪（最多 100×100ms 轮询，超时则整页跳转） |
 | `waitForVideoChangeSeason` | L1571 | `(expectedIndex: number) => Promise<void>` | 合集模式等待视频切换（通过检测 bvid 变化） |
 | `tryAutoPlay` | L1618 | `() => void` | 300ms 延迟后自动播放；被阻止则监听用户交互后重试 |
@@ -524,10 +559,10 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | `createUI` | L394 | `() => void` | 创建进度条（含 slider 语义/键盘可达性）、时间标签、分P指示器、设置按钮、设置面板 |
 | `buildMarkers` | L2073 | `() => void` | 在进度条上构建分 P 分隔标记 |
 | `updateUnifiedProgress` | L2086 | `() => void` | 按总时间线更新进度条宽度与时间文本，并高频刷新 `aria-valuenow/valuemax` |
-| `onProgressBarClick` | L2101 | `(e: MouseEvent) => void` | 点击进度条 → `seekToClientX` → `seekToOverallTime`（与拖拽/键盘三路径统一） |
+| `onProgressBarClick` | L2101 | `(e: MouseEvent) => void` | 点击进度条 → `seekToClientX` → `seekToOverallTime`（与拖拽/键盘三路径统一）。先用纯函数 `isClickSuppressed(ui.bar._suppressClick, Date.now(), CLICK_SUPPRESS_MS)` 判定是否跳过（拖拽 pointerup 已 seek，抑制紧随的 click）；命中则清零 stamp，窗口超时自动失效 |
 | `seekToOverallTime` | L918 | `(overallTime: number) => void` | 按电影总时间 seek（三路径共用）；`overallToPartOffset` 定位 → 同P currentTime / 跨P jumpToPart；clamp + 结尾 0.01s 余量（v1.6.0） |
 | `onProgressBarKeyDown` | L935 | `(e: KeyboardEvent) => void` | 键盘 seek：←/→ ±10s、PgUp/PgDn ±60s、Home/End；preventDefault + 立即刷新进度显示（v1.6.0） |
-| `showProgressTooltip` | L722 | `(e: Event) => void` | 悬停提示气泡（纯文字：时间 + 分P标题）；`overallToPartOffset` 定位分P（v2.0 起不含画面缩略图） |
+| `showProgressTooltip` | L722 | `(e: Event, nearInfo?: object) => void` | 悬停提示气泡（纯文字：时间 + 分P标题）；`overallToPartOffset` 定位分P（v2.0 起不含画面缩略图）。`nearInfo` 由调用方传入已算好的 `nearestMarkerInfo` 结果并透传给 `updateMarkerReveal`，一次 mousemove 只遍历标记层一次 |
 | `freezeFrame` / `unfreezeFrame` | L1026 / L1052 | `() => void` | 切P时把当前视频帧 `drawImage` 到 canvas 冻结盖住播放器（P1 末帧保持） / P2 首帧就绪后淡出 + 300ms 清空画布释放内存（v1.7.0） |
 | `updatePartIndicator` | L2209 | `() => void` | 更新分 P 指示器文本（P1/10 或 1/10） |
 | `updateMovieTitle` | L2225 | `() => void` | 清理页面标题中的 P 数信息 |
@@ -546,7 +581,7 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | `ensureSettingsPanelHost` | - | `(attachToFullscreen: boolean) => void` | 设置面板宿主管理（v2.0）：原生全屏内打开时 lazy reparent 到 `fullscreenElement` 子树（否则不可见），关闭/退出全屏时挂回 `document.body` |
 | `toggleSettingsPanel` | L2349 | `() => void` | 切换面板显示/隐藏；打开分支先 `ensureSettingsPanelHost(true)` 再定位 |
 | `positionSettingsPanel` | L2357 | `() => void` | 面板定位（**v1.12 起无按钮**：已保存位置优先，否则视口右上 `right:24px; top:24px`） |
-| `applySettings` | L2395 | `() => void` | 同步 body 类与全部 UI 显隐（v1.12 起：hidePartUI 恒 false、无 progress-style 切换、无设置按钮/徽章显隐逻辑） |
+| `applySettings` | L2395 | `() => void` | 同步 body 类与全部 UI 显隐。类取值来源各不相同，勿混：`cinema-active` ← `settings.enabled`（**单P视频也加**，playerWrap 同步）、`cinema-multi-part` ← `state.isMultiPart`（**只写不读**，无任何 CSS/JS 消费）、`cinema-season-mode` ← `state.mode === 'season'`、`cinema-bottom-progress` ← `isCinemaActive`（= `enabled && isMultiPart`）。自定义进度条 `ui.bar` 显隐与底栏时间接管/还原亦由 `isCinemaActive` 决定；`autoCloseTab` 关闭时收起提示气泡。v1.12 起无 progress-style 切换、无设置按钮/徽章显隐逻辑；`hidePartUI` 键与 `cinema-hide-parts` 类已整体删除；`updateLightsOut()` 调用 v1.14 已随关灯删除 |
 
 #### 进度恢复
 
@@ -558,8 +593,8 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 
 | 函数 | 行号 | 签名 | 说明 |
 |---|---|---|---|
-| `setupNavigationObserver` | L2478 | `() => void` | 监听 popstate + 劫持 pushState/replaceState + 1 秒轮询 |
-| `onNavigate` | L2508 | `() => void` | URL 变化处理：合集内切换、同视频分 P 切换、跨视频重新初始化；`state.restoringProgress` 时跳过 currentIndex 更新（v1.7.1） |
+| `setupNavigationObserver` | L2478 | `() => void` | 监听 popstate + 劫持 pushState/replaceState + 1 秒轮询。`navObserverHooked` 幂等标记跨 cleanup 保持（底层钩子从不移除）。**三处调用点**：`onVideoFound`（正常路径）+ `init` 数据重试耗尽分支 + `proceed` 视频元素重试耗尽分支——后两条是 init 失败后的自愈保障，否则观察器永远装不上，SPA 跳转到其他视频也无人重新 init |
+| `onNavigate` | L2508 | `() => void` | URL 变化处理：合集内切换、同视频分 P 切换、跨视频重新初始化；`state.restoringProgress` 时跳过 currentIndex 更新（v1.7.1）。init 失败后 `state.bvid` 为空，任何真实 bvid 都会被判为新视频 → `cleanup()` + 500ms 后重新 `init()`（自愈路径） |
 | `refreshVideoElement` | L2551 | `() => void` | 手动切换分 P 后刷新视频元素引用 |
 | `setupPlayerObserver` | L2567 | `() => void` | MutationObserver 防抖 300ms 监听播放器 DOM 变化 |
 
@@ -567,10 +602,11 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 
 | 函数 | 行号 | 签名 | 说明 |
 |---|---|---|---|
-| `init` | L2604 | `() => Promise<void>` | 加载设置 → 获取数据（失败重试 20 次×500ms）→ `proceed()` |
-| `proceed` | L2636 | `() => Promise<void>` | 确定 currentIndex → 补时长 → 算累计 → 等视频元素（30 次×500ms）→ `onVideoFound()` |
-| `onVideoFound` | L2677 | `() => Promise<void>` | 挂监听 → 建 UI → 加载偏好 → 注册快捷键 → 恢复进度 → 恢复显示模式 → 恢复播放器设置 → 每 10 秒存进度 |
-| `cleanup` | L2730 | `() => void` | 清定时器/观察器/监听器/UI/全部状态，供 SPA 导航切换视频时复用 |
+| `init` | L2604 | `() => Promise<void>` | 加载设置 → 获取数据（失败重试 20 次×500ms）→ `proceed()`；重试耗尽时提示 error 徽章并**补装导航观察器**（自愈） |
+| `proceed` | L2636 | `() => Promise<void>` | 确定 currentIndex → 补时长 → 算累计 → 等视频元素（30 次×500ms）→ `onVideoFound()`；等不到视频元素时同样**补装导航观察器** |
+| `onVideoFound` | L2677 | `() => Promise<void>` | 挂监听 → 建 UI → 加载偏好 → 注册快捷键 → 恢复进度 → 恢复显示模式 → 恢复播放器设置 → 每 10 秒存进度；此处才置 `state.initialized = true`（故两条失败分支后 `init` 可重入） |
+| `cleanup` | L2730 | `() => void` | 清定时器/观察器/监听器/UI/全部状态（含 `state.initialized = false`、`switchEpoch++` 作废残留轮询），供 SPA 导航切换视频时复用；调用 `teardownHoverPrefetch()` 移除 hover 预取监听 |
+| `teardownHoverPrefetch` | - | `() => void` | 移除 `setupHoverPrefetch` 挂在 document 上的 `mouseover`/`mouseout`（句柄存于 `ui.hoverHandlers`）并复位 `state.prefetchUiHooked`。此前这两个监听无法移除，SPA 导航后逐次累积 |
 
 ### 5.2 player-bridge.js
 
@@ -599,9 +635,12 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 
 ### 5.3 background.js
 
-| 函数 | 行号 | 说明 |
+| 函数 | 签名 | 说明 |
 |---|---|---|
-| `chrome.runtime.onMessage.addListener` | L8 | 仅处理 `closeTab`：`chrome.tabs.remove(sender.tab.id)`，异步响应 `{ ok: true }` |
+| `chrome.runtime.onMessage.addListener` | - | 消息路由，处理四类：`closeTab` / `getPopupData` / `setEnabled` / `toggleBookmark`，均 `return true` 走异步响应 |
+| `getPopupData` | `() => Promise<object>` | 组装 `{ settings, history, bookmarks, tab, current }`：`chrome.storage.sync.get(null)` → 展平 `cinemaHistory_c*` 分块 → 按 ts 降序取前 12 → 再查活动标签页补 `current`。**调用点必须带 `.catch`**：Promise 被拒时若不回送响应，消息通道会一直挂着，popup 停在加载态 |
+| `setEnabled` | `(enabled: boolean) => Promise<boolean>` | 更新 `cinemaSettings.enabled`（popup 总开关）；内部 try/catch 保证必定 resolve |
+| `toggleBookmarkInStorage` | `(item: object) => Promise<{ list, bookmarked }>` | 切换/去重/消毒/容量截断**与 content 侧共用 cinema-utils.js 的 `toggleBookmarkEntry`**（v1.16 收敛；此前本函数只做长度截断、缺字段清洗，与 core 已行为分叉）。本文件顶部需 `importScripts('cinema-utils.js')` |
 
 ---
 
@@ -619,11 +658,14 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | bridge → content | `__cinema_prefetch_done__` | 成功 `{ ok, name, cid, kind: 'video'\|'audio', bytes }` / 失败 `{ ok: false, reason, cid, kind }` | - |
 | content → bridge | `__cinema_config__` | `{ fastSwitch, p2pBlock, currentCid }`（设置变更/视频就绪时下发） | - |
 
-### 6.2 content.js ↔ background.js（chrome.runtime）
+### 6.2 content.js / popup.js ↔ background.js（chrome.runtime）
 
-| 方向 | 消息 | payload |
-|---|---|---|
-| content → background | `sendMessage` | `{ type: 'closeTab' }` |
+| 方向 | 消息 | payload | 响应 |
+|---|---|---|---|
+| content → background | `sendMessage` | `{ type: 'closeTab' }` | `{ ok }` |
+| popup → background | `sendMessage` | `{ type: 'getPopupData' }` | `{ settings, history, bookmarks, tab, current }`；失败回 `null`（popup 走 `render(null)` 空态） |
+| popup → background | `sendMessage` | `{ type: 'setEnabled', enabled }` | `{ ok }` |
+| popup → background | `sendMessage` | `{ type: 'toggleBookmark', item }` 或 `{ type: 'toggleBookmark', bvid }`（`item` 缺失时后台回退用 msg 本身） | `{ ok, bookmarked, list }` |
 
 ### 6.3 popup → content.js（chrome.tabs.sendMessage）
 
@@ -640,7 +682,7 @@ Service Worker，仅一个职责：监听 `chrome.runtime.onMessage` 中的 `{ t
 | 存储区 | Key | 结构 | 说明 |
 |---|---|---|---|
 | `sync` | `cinemaSettings` | `DEFAULT_SETTINGS` 对象 | 全部设置项（跨设备同步；旧版 local 数据首次加载时自动迁移） |
-| `sync` | `cinemaHistory_c0..n` + `cinemaHistoryMeta` | 每块 `{ [progressKey]: { bvid, title, pic, part, totalParts, time, totalDuration, mode, ts, watched } }`（≤15 条/块）+ `{ chunks: n }` | 观影记录（v1.4.0 迁移至 sync 跨设备同步）；`watched` 为累计实际观看秒数；**容量上限 100 条**（超出按 ts 淘汰最旧）；高频写入走 10 秒防抖 |
+| `sync` | `cinemaHistory_c0..n` + `cinemaHistoryMeta` | 每块 `{ [progressKey]: { bvid, title, pic, part, totalParts, time, overallTime, totalDuration, mode, ts, watched } }`（≤15 条/块）+ `{ chunks: n }` | 观影记录（v1.4.0 迁移至 sync 跨设备同步）；`time` 是 **P 内** `currentTime`，`totalDuration` 是**整部电影**总长，二者口径不同不可直接相除，popup 的总进度百分比用 `overallTime`（= `cumulative[part-1] + time`，电影内绝对位置）；`watched` 为累计实际观看秒数但**当前无任何 UI 读取**（死数据）；**容量上限 100 条**（超出按 ts 淘汰最旧）；高频写入走 10 秒防抖 |
 | `local` | `cinemaProgress` | `{ [bvid \| "season_"+seasonId]: { part, time, ts, mode, bvid } }` | 播放进度；合集模式以 seasonId 为 key（跨标签页同步机制，跨设备进度同步已删除） |
 | `local` | `cinemaPrefs` | `{ rate, volume, quality, danmaku }` | 播放设置记忆 |
 
@@ -692,23 +734,37 @@ sequenceDiagram
     C-->>P: 定时(每4次timeupdate)捕获画质/弹幕
 ```
 
-### 9.2 分P切换流程（`goToNextPart`）
+### 9.2 分P切换流程（`switchToPart`）
+
+`goToNextPart`（自动连播，`offsetSeconds = null`）与 `jumpToPart`（进度条跳转，带偏移）均为薄包装，共用同一实现。
 
 ```mermaid
 graph TB
-    A[ended] --> B[记录 displayMode + 暂停当前视频防竞态]
-    B --> C{模式}
+    A[ended / 进度条跨P跳转] --> A1{switching 锁 · 越界检查 · 同P?}
+    A1 -->|同P| A2[仅 video.currentTime = offset 后返回]
+    A1 -->|需切换| B[收起残留恢复卡 + cancelPrefetch keepCid + applyTempP2PBlock]
+    B --> B1[freezeFrame 钉末帧 → 暂停 → fadeOutVolume<br/>无缝且预取命中则跳过淡出]
+    B1 --> B2[记录 displayMode + saveProgress]
+    B2 --> C{模式}
     C -->|season| D[tryClickSeasonEpisode]
-    C -->|pages| E[switchPartViaPlayerAPI]
+    C -->|pages| E[switchPartViaPlayerAPI<br/>超时先探测 getCurrentPage 防双切]
     E -->|成功| F[waitForPlayerAPISwitch]
-    E -->|失败| G[tryClickNextPart]
+    E -->|失败| G[tryClickNextPart<br/>cid精确 → 选择器梯度 → 作用域内 pod → 链接扫描]
     G -->|成功| H[waitForVideoChange]
     G -->|失败| I[location.href 整页跳转 + sessionStorage]
     D -->|成功| J[waitForVideoChangeSeason]
     D -->|失败| I
-    F --> K[restoreDisplayMode + restorePlayerPrefs + 重置预取状态]
+    F --> K{ok?}
     H --> K
     J --> K
+    K -->|false| L[unfreezeFrame + 还原淡出静音<br/>+ showSwitchRecovery + armSwitchRecoveryWatch]
+    K -->|true| M[restoreDisplayMode → armAudioFadeIn]
+    M --> N{offsetSeconds 非空?}
+    N -->|是 jumpToPart| O[seek 到偏移 + tryAutoPlay]
+    N -->|否 goToNextPart| P[restorePlayerPrefs]
+    O --> Q[syncBridgeConfig → holdTransitionUntilFrame<br/>→ unfreezeFrame → 重置预取状态]
+    P --> Q
+    Q --> R[prewarmDanmaku + 800ms 链式预取]
 ```
 
 ### 9.3 预加载流程
@@ -733,13 +789,15 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A[用户点击进度条] --> B[计算目标总时间]
-    B --> C{目标是否在当前P?}
+    A[点击 / 拖拽松开 / 键盘 seek] --> B[seekToOverallTime 计算目标总时间]
+    B --> C{overallToPartOffset 定位<br/>目标是否在当前P?}
     C -->|是| D[video.currentTime = offset]
-    C -->|否| E[jumpToPart targetIndex, offset]
+    C -->|否| E[jumpToPart targetIndex, offset<br/>→ switchToPart]
     E --> F[三级切换策略]
-    F --> G[恢复设置 + 自动播放]
+    F --> G[seek 到偏移 + tryAutoPlay<br/>不走 restorePlayerPrefs]
 ```
+
+> `onProgressBarPointerUp` 会置 `ui.bar._suppressClick = Date.now()`，`onProgressBarClick` 在 500ms 窗口内跳过，避免拖拽松手后再触发一次重复 seek。用时间戳而非布尔量：click 未触发时窗口自动过期，不会误吞后续正常点击。
 
 ---
 
@@ -760,7 +818,6 @@ flowchart TD
 - **播放完毕**：无扩展界面（结束卡与「放映结束」提示已删除；如开启「播完关标签页」则仅显示倒计时气泡）
 - **跨标签页同步**：常驻开启（v1.12 起 `progressSync` 内化），多标签页播放同一视频进度自动合并
 - **极致快速切换**：常驻开启（v1.12 起 `fastSwitch`/`preloadNext` 内化）；配合预加载基本消除切换黑屏
-- **关灯模式**：L 键运行时切换（压暗程度固定 0.85，v1.12 起滑杆删除）
 - **观影记录**：扩展 popup「最近放映」列表展示（可点击续播）；存储层保留
 - **改代码后**：扩展管理页点击刷新按钮重载扩展，再刷新视频页
 
@@ -794,7 +851,7 @@ flowchart TD
 14. **多文件共享全局作用域**：5 个内容脚本在同一隔离世界按序注入，跨文件函数调用无需 import；顶层 `let`/`const` 命名全局唯一，新增顶层声明须先确认不与现有冲突；`init` 在最后一个文件（content.js）末尾触发，保证所有函数已声明
 15. **MutationObserver 收窄监听**：优先只观察播放器容器内部（`subtree`），另用 body 直接子节点观察器捕获容器整体重建；仅当容器不存在时才回退为观察整个 body
 16. **设置/观影记录存 `chrome.storage.sync`**（跨设备）；进度/偏好存 `local`；读取时若 sync 为空会自动从旧版 local 迁移。跨设备进度同步已删除（R2），`cinemaProgressSync` 不再读写
-17. **关灯遮罩用超大 `box-shadow` 挖孔**：遮罩本体透明覆盖播放器、`pointer-events:none`，不阻挡播放器交互；原生全屏时全屏元素位于顶层，遮罩自动隐藏
+17. **关灯模式已整体删除**（v1.14，用户裁定"看视频时用不到"）：`updateLightsOut`/`isBigScreenDisplay`/`toggleLights` 分支/`onCinemaPlay`/`onCinemaPause`（含 play/pause 绑定）/`#cinema-lights-out` 遮罩/`#cinema-vignette` 暗角/`cinema-lights-out-active` 水印选择器组/`settings.lightsOut` 键/`CINEMA_OPACITY` 全部移除。**水印净化保留**——挂 `body.cinema-active` 与 `.cinema-active`（影院激活即生效，不依赖关灯）。请勿复用这些标识符
 18. **跨标签页进度同步须防互相覆盖**：`saveProgress` 记录本地时间戳，`onProgressStorageChanged` 只在「收到 key 相同 + 远端 `ts` 更新 + 距上次保存 >5 秒 + 远端时间超前」时顺延；`progressSync` 关闭时忽略
 19. **纯函数必须留在 `cinema-utils.js`**：新增可单测逻辑放该文件并补 `tests/unit.test.js` 用例；`cinema-utils.js` 用 UMD 写法（`module.exports` + `window` 挂载），勿引入 DOM/`chrome.*` 依赖（单测在 Node 下运行）
 20. **悬停画面预览已移除**（v2.0）：videoshot 雪碧图预览整模块删除，`showProgressTooltip` 现为纯文字（时间 + 分P标题），勿再引入雪碧图请求
@@ -812,9 +869,9 @@ flowchart TD
 32. **P2P 屏蔽的实现选择**：不替换 `RTCPeerConnection`（构造即抛错会触发 bwp `~2s connectTimeout` 悬挂——分片加载即时路径无 try/catch，切P首个媒体段必踩，黑屏反而变长）；改为删除 P2P SDK 全局（`DIYSdk` 等）+ 250ms 定期重删 `__DASH_P2P_TYPE__`，走 bwp 自带的"SDK 缺失 → 删类型 → 纯 XHR"安全回退，零悬挂。SDK 脚本由 `setP2pType` 动态注入重定义全局，故需开启期间持续压制。激进项默认关；切下一P后生效（核心每分片请求现读 `__DASH_P2P_TYPE__`），刷新更彻底。失败开放：B站改名则静默失效回到默认行为
 33. **三路径 seek 统一**：点击/拖拽/键盘共用 `seekToOverallTime`；`overallToPartOffset` 在 `overall === totalDuration` 时返回 null，故 End/最右边缘统一收 0.01s 余量（避免 seek 到 `video.duration` 立即触发 ended）
 34. **过渡层已整体删除**（v1.11）：`showTransition`/`hideTransition` 函数、`#cinema-transition` DOM 与样式、`.cinema-transition-text`、`--c-transition-bg` 令牌、`state.transitionTimer`/`ui.transition` 字段全部移除——切P黑屏防护完全依赖冻结帧遮罩（`holdTransitionUntilFrame` 门控揭帧）；结束卡及其 `.cinema-finished-actions` 常驻节点此前已一并删除
-35. **面板动效选型**：设置面板用 visibility 过渡（.18s 末尾翻转 hidden，先淡出后隐藏）；关灯遮罩 `.on` class + opacity .5s，首次点亮 rAF 推迟一帧保证过渡可见
+35. **面板动效选型**：设置面板用 visibility 过渡（.18s 末尾翻转 hidden，先淡出后隐藏）；关灯遮罩动效已随关灯删除（v1.14）
 36. **进度条样式仅 classic / minimal**（v2.0）：minimal 为 3px 纤细线（hover 不增高、无圆角滑块、`::after` 隐藏），classic 为基础样式；新增样式前需在 `DEFAULT_SETTINGS` 白名单、设置面板 select 与 `applySettings` 的 classList.remove 三处同步
-37. **性能注意**：`aria-valuenow` 在 `updateUnifiedProgress` 高频更新（setAttribute 可接受，无需节流）
+37. **性能注意（v1.15 已改）**：`aria-valuenow`/`aria-valuemax` 只在整秒变化时写，上次值缓存在 `ui.bar._ariaNow`/`_ariaMax`（挂在元素自身，进度条重建后新元素无缓存会自动重写一次，无需失效逻辑）
 38. **设置面板原生全屏宿主管理**（v2.0）：面板挂 `document.body`，原生全屏只渲染 fullscreenElement 子树 → 挂 body 的面板在原生全屏内不可见。`ensureSettingsPanelHost(true)` 在打开时把面板 lazy reparent 到 `fullscreenElement` 子树，关闭/退出全屏时 `ensureSettingsPanelHost(false)` 归还 `document.body`（fixed 定位免受播放器子树 transform/overflow 影响）；网页全屏（webscreen）无 `document.fullscreenElement`，不受影响。勿改 z-index（面板 99999 已足够）
 39. **结束卡已整体删除**（v1.11）：播完无扩展界面（`showFinishedActions`/`hideFinishedActions`、`.cinema-finished-*` 样式与单行「放映结束」提示一并移除）；`resolveNextWork` 曾因 `extractPageData`/`proceed` 仍在调用而保留（写 `state.nextWork`），后续清理时确认无任何读取方，连同 `state.nextWork`/`state.related` 与三个解析路径的 related 透传一并删除（死数据）
 40. **冻结帧 drawImage 不污染 canvas**：B站流是 MSE blob（同源数据），video 元素 drawImage 到 canvas 不触发 CORS 污染（跨域直链 src 才会）；canvas z-index 150 高于进度条 100，盖住视频（原「低于过渡层 200」的层级关系已随 v1.11 过渡层删除失效）
@@ -824,4 +881,18 @@ flowchart TD
 44. **设置按钮全屏可见性**（v1.7.1 修复 → v2.0 重构）：原生全屏只渲染全屏元素子树，挂 `document.body` 的按钮不可见。v1.7.1 的 `fsEl.appendChild(settingsBtn/settingsPanel)` reparent 已移除（v2.0）；现为：进入原生全屏时 `settingsBtn.style.display='none'` + 面板收起 `.visible`，退出时 `ensureSettingsPanelHost(false)` 归还面板 + `applySettings()` 按设置恢复；面板在原生全屏内由 S 键/双击/popup 打开时经 `ensureSettingsPanelHost(true)` lazy reparent 到 fullscreenElement 子树
 45. **状态徽章**（v1.7.2 常驻化 → v2.0 默认关 → v3 统一闪现 → v1.12 纯 error）：v1.7.2 起 info/success 不再自动隐藏、由 `showStatusBadge` 设置项控制；v2.0 起默认 `false`，error 无视设置临时显示约 5 秒；v3 起三类消息统一约 5 秒自动淡出；**v1.12 起键删除，函数收敛为纯 error toast（非 error 调用直接忽略），info/success 调用点与 CSS 类一并删除**
 46. **底栏时间仅接管总时长**（R2）：`updateBottomTimeDisplay(totalDuration)` 只写「总时长」元素（`.bpx-player-ctrl-time-duration` / `.squirtle-time-duration` / `.bilibili-player-video-time-total` / 容器兜底末 span），不再覆写原生「当前时间」元素（B站自走）；`restoreNativeBottomTime` 保留为退出影院时还原总时长
-47. **已删除功能一览**（R2）：跳过指定片段（含 cinema-skips.js、`enableSkips`、`cinemaSkip_*`、Alt+[/]）、片头/片尾跳过（`skipIntro`/`skipOutro`/`introDuration`/`outroDuration`、`ioOverride`、`cinemaIntroOutro`）、幕间 ACT 卡与 `showTransition` 设置键、跨设备进度同步（`deviceSync`、`writeSyncProgress` 等、`cinemaProgressSync`）、onboarding 引导弹窗（`onboardingDone`）。**v1.11 追加**：播放完毕结束卡整体删除（`showFinishedActions`/`hideFinishedActions`、`.cinema-finished-*` 样式、单行「放映结束」提示）——播完无扩展界面；过渡层整体删除（`showTransition`/`hideTransition`、`#cinema-transition` 与 `.cinema-transition-text` 样式、`--c-transition-bg` 令牌、`state.transitionTimer`/`ui.transition` 字段）。**v1.12 追加**：设置键 `showSettingsBtn`/`showStatusBadge`/`p2pBlock`/`p2pTempMs`/`lightsOutOpacity`/`progressStyle`/`theme`/`shortcuts` 及全部子项；悬浮齿轮按钮（`initSettingsBtnDrag`、`cinemaSettingsBtnPos`）；快捷键编辑器（`SHORTCUT_ACTIONS`/`getShortcuts`/`renderShortcutEditor`/`beginShortcutCapture`/`cancelShortcutCapture`、`shortcutCapturing`/`shortcutCaptureHandler` 状态）；备份导入导出（`exportCinemaBackup`/`importCinemaBackup`/`importHistoryMerge`/`importProgressLocalMerge`/`importBookmarksMerge`/`onExportBackup`/`onImportBackupFile`）；六分组折叠架构（`initSettingsPanelGroups`、`cinemaPanelGroups`、`.cinema-sp-section/.sp-group/.sp-caret` 等 CSS）；进度条 minimal 样式、ghost `::before` 预览层与 `--hover-pct` 变量。新增功能请勿复用这些标识符，历史存储中的残留键不读取、不迁移、不清理（防误删用户数据）。
+47. **已删除功能一览**（R2）：跳过指定片段（含 cinema-skips.js、`enableSkips`、`cinemaSkip_*`、Alt+[/]）、片头/片尾跳过（`skipIntro`/`skipOutro`/`introDuration`/`outroDuration`、`ioOverride`、`cinemaIntroOutro`）、幕间 ACT 卡与 `showTransition` 设置键、跨设备进度同步（`deviceSync`、`writeSyncProgress` 等、`cinemaProgressSync`）、onboarding 引导弹窗（`onboardingDone`）。**v1.11 追加**：播放完毕结束卡整体删除（`showFinishedActions`/`hideFinishedActions`、`.cinema-finished-*` 样式、单行「放映结束」提示）——播完无扩展界面；过渡层整体删除（`showTransition`/`hideTransition`、`#cinema-transition` 与 `.cinema-transition-text` 样式、`--c-transition-bg` 令牌、`state.transitionTimer`/`ui.transition` 字段）。**v1.12 追加**：设置键 `showSettingsBtn`/`showStatusBadge`/`p2pBlock`/`p2pTempMs`/`lightsOutOpacity`/`progressStyle`/`theme`/`shortcuts` 及全部子项；悬浮齿轮按钮（`initSettingsBtnDrag`、`cinemaSettingsBtnPos`）；快捷键编辑器（`SHORTCUT_ACTIONS`/`getShortcuts`/`renderShortcutEditor`/`beginShortcutCapture`/`cancelShortcutCapture`、`shortcutCapturing`/`shortcutCaptureHandler` 状态）；备份导入导出（`exportCinemaBackup`/`importCinemaBackup`/`importHistoryMerge`/`importProgressLocalMerge`/`importBookmarksMerge`/`onExportBackup`/`onImportBackupFile`）；六分组折叠架构（`initSettingsPanelGroups`、`cinemaPanelGroups`、`.cinema-sp-section/.sp-group/.sp-caret` 等 CSS）；进度条 minimal 样式、ghost `::before` 预览层与 `--hover-pct` 变量。新增功能请勿复用这些标识符，历史存储中的残留键不读取、不迁移、不清理（防误删用户数据）。**v1.14 追加**：关灯模式整体删除——`settings.lightsOut` 键、`toggleLights:'KeyL'` 快捷键、`CINEMA_OPACITY` 常量、`updateLightsOut`/`isBigScreenDisplay`/`onCinemaPlay`/`onCinemaPause`（含 play/pause 绑定）、`#cinema-lights-out` 遮罩、`#cinema-vignette` 暗角、`cinema-lights-out-active` 水印选择器组；水印净化保留（挂 `cinema-active`）。**v1.15 追加**（死代码清剿）：零引用设计令牌 9 个（`--c-radius-pill`/`--c-panel-bg-solid`/`--c-row-hover`/`--c-chip-bg`/`--c-caret`/`--c-option-bg`/`--c-overlay-bg`/`--c-badge-info`/`--c-badge-success`）；`.cinema-sp-row` 与 4 条 `.cinema-sp-toggle:has(input:disabled)`（v1.12「总开关灰置子级」设计遗留，JS 从不置 disabled）；`ui.timeLabel`/`ui.partLabel` 死字段；`state.aid`/`state.seasonTitle` 写而不读字段及其全部写入点（parsed 数据与剧集对象里的 `aid` 保留，仅去掉顶层镜像）。
+48. **音量偏好污染（"莫名其妙静音"根因）**：`onPlayerVolumeChange` 曾把 `video.muted` 折算为 `vol = 0` 落盘，而 B站自身会在广告/初始化/清晰度切换时静音，于是 `prefs.volume = 0` 被当作用户偏好持久化，此后每次加载都强制静音。三重防护，改动任一处都要同步检查另两处：① `onPlayerVolumeChange` 在 `video.muted` 时直接 return 不记录；② `loadPlayerPrefs` 读到存量 `volume === 0` 视为污染，重置为 1 并回写；③ `restorePlayerPrefs` 要求 `volume > 0` 才恢复。另有 `fadeInVolume` 置 `prefsGuardUntil = now + 2000` 防淡入首步的 0 被误记，`armAudioFadeIn` 兜底改为**无条件**淡入（原仅在非暂停时淡入，自动播放被拦会让 volume=0 永久悬挂）。
+49. **分P切换只有一份实现**：`switchToPart(targetIndex, offsetSeconds)` 是唯一实现，`goToNextPart`/`jumpToPart` 是薄包装，仅在落地后按 `offsetSeconds` 是否为空分叉（非空 → seek + `tryAutoPlay`；空 → `restorePlayerPrefs`）。此前是两份约 100 行的近似实现，任何一侧的修复都容易漏掉另一侧——**新增切换行为只改 `switchToPart`**。调用方全部 fire-and-forget，不要 `await` 这两个包装函数（它们不再等待切换完成）。`switchPartViaPlayerAPI` 的 600ms 超时**不等于失败**：先探测 `getCurrentPage()`，已切到目标则 `resolve(true)`，否则结果事件晚到时点击兜底会造成双切。
+50. **`.video-pod__item` 不是本视频专属类名**：页面推荐区同样使用该类（代码注释里早有实测记录），因此 `document.querySelector('.video-pod__item:nth-child(N)')` 会在 cid 精确匹配失败时点到**其他视频**的卡片并导航离开当前页——比切换失败更糟。`tryClickNextPart` 的 pod 兜底必须先经 `findOwnEpisodeScope()` 拿作用域（用本视频任一已知 cid 反查容器），定不到作用域就跳过，交给 bvid 限定的链接扫描与整页跳转。**新增任何 `.video-pod__item` 选择器都必须限定作用域。**
+51. **init 失败必须留自愈路径**：`setupNavigationObserver()` 有三处调用点——`onVideoFound`（正常）+ `init` 数据重试耗尽分支 + `proceed` 视频元素重试耗尽分支。后两处不可删：`state.initialized` 只在 `onVideoFound` 置真，两条失败分支都走不到那里，若不补装观察器则后续 SPA 跳转到其他视频时无人重新 init，影院模式死到用户手动刷新为止。观察器自带 `navObserverHooked` 幂等标记，重复调用安全。
+52. **观影记录的 `time` 与 `totalDuration` 口径不同**：`time` 是 P 内 `video.currentTime`，`totalDuration` 是整部电影总长，直接相除会得出错误百分比（3P 各 600/900/300 秒、看到第 2P 的 450 秒时应为 58%，直接相除得 25%）。总进度一律用 `overallTime`（= `cumulative[part-1] + time`）。旧记录无该字段：单P可用 `time` 兜底（等价），多P无法换算则不显示百分比。另：popup 曾读根本不存在的 `histItem.duration`，导致百分比恒为 0、进度条恒走 `'20%'` 兜底——改字段名时注意核对写入侧。
+53. **background 消息处理必须保证 `sendResponse` 必定被调用**：监听器 `return true` 后消息通道会一直等着，Promise 被拒而没回送响应就会让 popup 永久停在加载态。`getPopupData().then(sendResponse)` 必须带 `.catch(() => sendResponse(null))`；`setEnabled`/`toggleBookmarkInStorage` 则靠内部 try/catch 保证必定 resolve。新增消息类型时照此办理。
+54. **几何测量按事件透传，不做跨手势缓存**（v1.15）：进度条相关的 `getBoundingClientRect` 一律在事件处理器**开头**读一次（`barRect()`）再向下透传；读取点必须在任何 class/style 写之前，否则触发强制同步重排。**不要改成 `pointerdown` 缓存整段拖拽复用**——布局会在滚动、网页全屏切换、播放器容器重建、B 站自身改宽时变化，缓存需在每个时机失效，漏一处就读到旧 rect 使 seek 落点偏移；按事件透传无失效路径且同样只测一次。
+55. **bridge 影子属性清理按合成标记门控**（v1.15）：XHR 包装复用原生实例，合成响应（`serveStoredBytes` 的 206 切片、playurl 本地 JSON）用 `defineProperty` 装了 `responseText`/`status`/`readyState` 等只读遮蔽属性，`open()` 须 `delete` 清理，否则复用实例上一次的合成结果会遮蔽本次真实响应。清理已改为仅当 `_cinemaSynthetic` 为真时执行（标记在两处合成点置位，playurl 处置位在 `try` 之外以防部分安装后泄漏）。**不要改成"按 URL 白名单跳过整个 open()"**——那会连带跳过必要的清理，重新引入遮蔽 bug。`setRequestHeader` 的 `Range` 记录同理只对 `_cinemaByteCandidate` 为真的请求生效（该标记在 `open()` 阶段已定，早于任何 `setRequestHeader`）。
+56. **展示层不得编造兜底数值 / 文案必须贴合数据口径**（v1.15.2 复核得到，改 UI 前必读）：
+   - **不编兜底值**：popup「正在观影」卡的进度条曾因换算不出百分比而固定画 `'20%'` 宽（更早是因为读了不存在的 `histItem.duration` 导致恒走该兜底）。用户把**条长读作进度**，任何固定兜底宽度都是在给错误信息。正确做法：算不出就整行收起（`#cinema-hero-prog-row` display none），副标题「第 X/Y 集 · 播放至 mm:ss」已如实表达位置，不损失信息。
+   - **文案贴合口径**：观影记录的 `time` 是**该P内停住的位置**（`video.currentTime`），不是累计观看时长（累计是 `watched` 字段，尚未接 UI）。列表行原写「已看 mm:ss」会被读成"看了多久"，已统一为「播放至」。同理 `time` 与 `totalDuration` 口径不同，总进度必须用 `overallTime`（见约束 52）。
+57. **性能优化不得牺牲正确性——"感知不到"要先证明再说**（v1.15.2）：v1.15 曾把 tooltip 半宽改为"读上一帧宽度"并断言"滞后一次事件不可感知"，该判断错误：pill 出现正是宽度约 3 倍剧变的时刻，且必然伴随近边界/跨P悬停，旧宽度会让 tooltip 溢出进度条端点。已改为**按内容签名缓存**（`ui.tooltip._lastHtml` / `_half`，挂在元素自身，重建后自动重量）：内容与上次相同则本轮完全不读布局，不同才写 `innerHTML` 并回量一次——比原方案更省且无溢出。凡是"用旧值替代本次读取"的优化，必须能说清旧值在**最坏时刻**是否仍成立，不能只看平均值。
+58. **`cinema-utils.js` 是四上下文共用的纯函数库**（v1.16）：除 manifest 声明的两组 content script（MAIN 与隔离世界）外，`popup.html` 用 `<script src="cinema-utils.js">` 先于 `popup.js` 加载、`background.js` 用 `importScripts('cinema-utils.js')` 加载（**依赖 background 未声明 `type: module` 才是经典 SW**；若将来改为 module，`importScripts` 会抛错、后台弹窗全挂）。因此：① 该文件**必须保持 UMD 且零 DOM/chrome/window 依赖**，否则某个上下文整体加载失败；② 顶层导出名不得与任何文件的顶层 `const`/`let`/`function` 同名（全局词法作用域冲突会让整个脚本失读）——需要"单一数字"时像 `BOOKMARK_CAP` 那样留在文件内部、靠函数默认参数生效，不要导出；③ 新增共享逻辑优先加在此处，popup/content/background 三侧不要再复制副本。
+59. **MediaSession 只在隔离世界动、且严格非覆盖 B站**（v1.18，B1）：`navigator.mediaSession` 是 Web API，隔离世界可直接读写，**无需经 player-bridge 注入 MAIN world**（与需要 `window.player` 的切P不同）。B站自身已注册 `play`/`pause`/`seekbackward`/`seekforward`/`seekto` 与 metadata——本扩展一律**不碰这些**，只做两件事：① 覆盖 metadata 的 `title`（改为当前分P标签）与 `album`（电影名），`artist`/`artwork` 从 B站 现有 metadata 读出后原样保留（读不到才回退 `state.pic`），避免夺走原生封面/UP 名；② 补 B站未注册的 `previoustrack`/`nexttrack`（Chrome 卡片里本就置灰），处理器直接调 `cinemaNextPart`/`cinemaPrevPart`——即键盘 N/P 的**同一函数**（`goToNextPart` 受 `advanceTarget` 守卫、`jumpToPart` 手动跳转），使「第三个切P入口」不引入新竞态。**门禁**：`settings.enabled && state.isMultiPart` 为真才注册，否则把这两个 handler 置 `null` 且不动 B站 metadata；`updateMediaSession` 挂在 `applySettings`（setup/开关切换）、`onVideoReady`（任意切P路径，含 B站原生选集点击）、`switchToPart` 落地（currentIndex 已定的权威刷新）三处，幂等；`teardownMediaSession` 随 `cleanup` 移除 handler。**不加定时器、不写盘、不改 `video.src`、不进 `onTimeUpdate` 热路径**（未实现 `setPositionState`，进度/scrub 仍归 B站）。分P标签口径已合一：`mediaSessionPartLabel` 与 `showProgressTooltip` 现均调 `cinema-utils.js` 的纯函数 `partDisplayLabel(mode, index, part)`（约束 19/58），不再各存一份内联格式、无需手动对齐；输出字节一致，故 `showProgressTooltip` 的 `_lastHtml` 内容签名缓存（约束 57）与 v1.15 reflow 优化不受影响。
